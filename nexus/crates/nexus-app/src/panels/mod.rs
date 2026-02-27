@@ -5,7 +5,6 @@ pub mod time_series;
 pub mod global_variable;
 pub mod button_links;
 
-use serde_json::Value;
 
 /// Available panel types
 pub fn panel_types() -> Vec<(&'static str, &'static str, &'static str)> {

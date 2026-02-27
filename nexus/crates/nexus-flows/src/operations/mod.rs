@@ -13,7 +13,7 @@ pub mod sleep;
 pub mod transform;
 pub mod trigger;
 
-use crate::{FlowOperation, manager::FlowManager};
+use crate::manager::FlowManager;
 use std::sync::Arc;
 
 /// Register all built-in operations with the flow manager

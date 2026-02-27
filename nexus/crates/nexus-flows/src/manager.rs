@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Flow manager — loads, registers, and executes flows
 /// Mirrors api/src/flows.ts

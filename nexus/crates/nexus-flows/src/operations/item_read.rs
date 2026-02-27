@@ -12,22 +12,40 @@ impl FlowOperation for ItemReadOperation {
         &self,
         _data: Value,
         options: &Value,
-        _context: &OperationContext,
+        context: &OperationContext,
     ) -> Result<Value, FlowError> {
         let collection = options
             .get("collection")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FlowError::InvalidConfig("Missing 'collection'".to_string()))?;
+            .ok_or_else(|| FlowError::InvalidConfig("Missing 'collection'".to_string()))?
+            .to_string();
 
-        let query = options.get("query").cloned().unwrap_or(json!({}));
+        let key = options.get("key").and_then(|v| v.as_str()).map(String::from);
+        let query_opt = options.get("query").cloned();
 
-        // TODO: Use ItemsService to read items
-        tracing::info!(collection = collection, "Item read operation");
+        let svc_ctx = context.service_context().ok_or_else(|| {
+            FlowError::Internal("No service context available".to_string())
+        })?;
 
-        Ok(json!({
-            "collection": collection,
-            "query": query,
-        }))
+        let service = nexus_services::items::ItemsService::new(&collection, svc_ctx);
+
+        if let Some(key) = key {
+            let pk = nexus_types::items::PrimaryKey::String(key);
+            let item = service.read_one(&pk, None, None).await.map_err(|e| {
+                FlowError::OperationFailed(format!("Failed to read item: {}", e))
+            })?;
+            Ok(item)
+        } else {
+            let query = query_opt
+                .and_then(|q| serde_json::from_value(q).ok())
+                .unwrap_or_default();
+
+            let items = service.read_by_query(query, None).await.map_err(|e| {
+                FlowError::OperationFailed(format!("Failed to read items: {}", e))
+            })?;
+
+            Ok(json!(items))
+        }
     }
 
     fn operation_type(&self) -> &str {

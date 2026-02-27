@@ -6,7 +6,7 @@ use crate::components::avatar::Avatar;
 pub fn UserDisplay(
     value: Value,
 ) -> impl IntoView {
-    let (name, email) = match &value {
+    let (name, _email) = match &value {
         Value::Object(obj) => {
             let first = obj.get("first_name").and_then(|v| v.as_str()).unwrap_or("");
             let last = obj.get("last_name").and_then(|v| v.as_str()).unwrap_or("");

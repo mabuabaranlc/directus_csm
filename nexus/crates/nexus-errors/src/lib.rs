@@ -350,3 +350,131 @@ pub fn invalid_query(reason: &str) -> NexusError {
         reason: reason.to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_code_mapping() {
+        assert_eq!(NexusError::Internal.code(), ErrorCode::Internal);
+        assert_eq!(NexusError::InvalidCredentials.code(), ErrorCode::InvalidCredentials);
+        assert_eq!(NexusError::TokenExpired.code(), ErrorCode::TokenExpired);
+        assert_eq!(NexusError::UserSuspended.code(), ErrorCode::UserSuspended);
+        assert_eq!(NexusError::InvalidOtp.code(), ErrorCode::InvalidOtp);
+        assert_eq!(NexusError::InvalidIp.code(), ErrorCode::InvalidIp);
+        assert_eq!(NexusError::OutOfDate.code(), ErrorCode::OutOfDate);
+        assert_eq!(NexusError::ContentTooLarge.code(), ErrorCode::ContentTooLarge);
+    }
+
+    #[test]
+    fn test_status_codes() {
+        assert_eq!(NexusError::Internal.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(NexusError::InvalidCredentials.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(NexusError::TokenExpired.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(NexusError::UserSuspended.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(NexusError::ContentTooLarge.status_code(), StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(forbidden(None).status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(invalid_payload("bad data").status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(invalid_query("bad query").status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            NexusError::RouteNotFound { path: "/test".to_string() }.status_code(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            NexusError::MethodNotAllowed { allowed: vec!["GET".into()], current: "DELETE".into() }.status_code(),
+            StatusCode::METHOD_NOT_ALLOWED
+        );
+    }
+
+    #[test]
+    fn test_error_messages() {
+        assert_eq!(NexusError::InvalidCredentials.to_string(), "Invalid user credentials.");
+        assert_eq!(forbidden(Some("Admin access required.")).to_string(), "Admin access required.");
+        assert_eq!(forbidden(None).to_string(), "You don't have permission to access this.");
+        assert_eq!(
+            invalid_payload("Missing required field: name").to_string(),
+            "Invalid payload. Missing required field: name."
+        );
+        assert_eq!(
+            NexusError::RouteNotFound { path: "/api/v1/test".to_string() }.to_string(),
+            "Route /api/v1/test doesn't exist."
+        );
+        assert_eq!(NexusError::TokenExpired.to_string(), "Token expired.");
+    }
+
+    #[test]
+    fn test_error_response_format() {
+        let err = NexusError::InvalidCredentials;
+        let response = ErrorResponse::from(&err);
+        assert_eq!(response.errors.len(), 1);
+        assert_eq!(response.errors[0].message, "Invalid user credentials.");
+        assert_eq!(response.errors[0].extensions.code, ErrorCode::InvalidCredentials);
+    }
+
+    #[test]
+    fn test_error_response_serialization() {
+        let err = NexusError::InvalidCredentials;
+        let response = ErrorResponse::from(&err);
+        let json = serde_json::to_value(&response).unwrap();
+        assert!(json["errors"].is_array());
+        assert_eq!(json["errors"][0]["message"], "Invalid user credentials.");
+        assert_eq!(json["errors"][0]["extensions"]["code"], "INVALID_CREDENTIALS");
+    }
+
+    #[test]
+    fn test_error_code_serialization_format() {
+        let test_cases = vec![
+            (ErrorCode::ContainsNullValues, "CONTAINS_NULL_VALUES"),
+            (ErrorCode::ContentTooLarge, "CONTENT_TOO_LARGE"),
+            (ErrorCode::Forbidden, "FORBIDDEN"),
+            (ErrorCode::Internal, "INTERNAL_SERVER_ERROR"),
+            (ErrorCode::InvalidCredentials, "INVALID_CREDENTIALS"),
+            (ErrorCode::InvalidPayload, "INVALID_PAYLOAD"),
+            (ErrorCode::InvalidQuery, "INVALID_QUERY"),
+            (ErrorCode::InvalidToken, "INVALID_TOKEN"),
+            (ErrorCode::TokenExpired, "TOKEN_EXPIRED"),
+            (ErrorCode::RouteNotFound, "ROUTE_NOT_FOUND"),
+            (ErrorCode::ServiceUnavailable, "SERVICE_UNAVAILABLE"),
+        ];
+        for (code, expected) in test_cases {
+            let serialized = serde_json::to_value(&code).unwrap();
+            assert_eq!(serialized.as_str().unwrap(), expected, "Failed for {:?}", code);
+        }
+    }
+
+    #[test]
+    fn test_helper_functions() {
+        match forbidden(Some("test reason")) {
+            NexusError::Forbidden { reason } => assert_eq!(reason.unwrap(), "test reason"),
+            _ => panic!("Expected Forbidden"),
+        }
+        match invalid_payload("bad data") {
+            NexusError::InvalidPayload { reason } => assert_eq!(reason, "bad data"),
+            _ => panic!("Expected InvalidPayload"),
+        }
+        match invalid_query("invalid filter") {
+            NexusError::InvalidQuery { reason } => assert_eq!(reason, "invalid filter"),
+            _ => panic!("Expected InvalidQuery"),
+        }
+    }
+
+    #[test]
+    fn test_error_with_fields() {
+        let err = NexusError::ContainsNullValues {
+            collection: "users".to_string(),
+            field: "email".to_string(),
+        };
+        assert_eq!(err.code(), ErrorCode::ContainsNullValues);
+        assert!(err.to_string().contains("email"));
+        assert!(err.to_string().contains("users"));
+
+        let err = NexusError::RecordNotUnique {
+            collection: Some("articles".to_string()),
+            field: Some("slug".to_string()),
+            value: Some("hello-world".to_string()),
+        };
+        assert_eq!(err.code(), ErrorCode::RecordNotUnique);
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+    }
+}

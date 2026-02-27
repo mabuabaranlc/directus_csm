@@ -90,6 +90,9 @@ pub struct OperationContext {
     pub accountability: Option<String>,
     pub data: HashMap<String, Value>,
     pub trigger_payload: Value,
+    /// Service context for database operations, stored as opaque type to avoid
+    /// DashMap lifetime issues with async_trait
+    service_ctx: Option<std::sync::Arc<dyn std::any::Any + Send + Sync>>,
 }
 
 impl OperationContext {
@@ -99,7 +102,27 @@ impl OperationContext {
             accountability: None,
             data: HashMap::new(),
             trigger_payload,
+            service_ctx: None,
         }
+    }
+
+    /// Create a context with a service context for database operations
+    pub fn with_service_ctx(flow_id: &str, trigger_payload: Value, service_ctx: nexus_services::context::ServiceContext) -> Self {
+        Self {
+            flow_id: flow_id.to_string(),
+            accountability: None,
+            data: HashMap::new(),
+            trigger_payload,
+            service_ctx: Some(std::sync::Arc::new(service_ctx)),
+        }
+    }
+
+    /// Get the service context for database operations
+    pub fn service_context(&self) -> Option<nexus_services::context::ServiceContext> {
+        self.service_ctx
+            .as_ref()
+            .and_then(|ctx| ctx.downcast_ref::<nexus_services::context::ServiceContext>())
+            .cloned()
     }
 
     /// Get data from a previous operation by key ($last, $trigger, or operation key)

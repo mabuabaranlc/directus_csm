@@ -7,7 +7,7 @@ pub fn SelectDropdownInterface(
     #[prop(optional)] choices: Option<Vec<(String, String)>>,
     #[prop(optional)] placeholder: Option<String>,
     #[prop(optional)] disabled: Option<bool>,
-    #[prop(optional)] allow_other: Option<bool>,
+    #[prop(optional)] _allow_other: Option<bool>,
     on_change: Callback<Value>,
 ) -> impl IntoView {
     let display_value = move || match value.get() {

@@ -37,7 +37,7 @@ impl AuthenticationService {
         &self,
         email: &str,
         password: &str,
-        mode: Option<&str>,
+        _mode: Option<&str>,
         otp: Option<&str>,
     ) -> Result<Value, ServiceError> {
         // Find the user by email

@@ -1,11 +1,8 @@
 use crate::context::ServiceContext;
 use nexus_database::{DatabaseBackend, SqlValue};
-use nexus_types::accountability::Accountability;
 use nexus_types::items::{Item, MutationOptions, PrimaryKey, QueryOptions};
 use nexus_types::query::Query;
-use nexus_types::schema::SchemaOverview;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Core CRUD service for all collections
@@ -13,7 +10,7 @@ use std::sync::Arc;
 pub struct ItemsService {
     pub collection: String,
     pub ctx: ServiceContext,
-    event_scope: String,
+    _event_scope: String,
 }
 
 impl ItemsService {
@@ -28,7 +25,7 @@ impl ItemsService {
         Self {
             collection: collection.to_string(),
             ctx,
-            event_scope,
+            _event_scope: event_scope,
         }
     }
 

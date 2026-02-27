@@ -1,7 +1,5 @@
 use crate::{ExtensionError, LoadedExtension};
 use serde_json::Value;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// WASM runtime for executing extensions compiled to WebAssembly
 /// Uses wasmtime for sandboxed execution of Rust/Go/Python/Java extensions
@@ -25,7 +23,7 @@ impl WasmRuntime {
     pub async fn execute(
         &self,
         extension: &LoadedExtension,
-        event: &str,
+        _event: &str,
         payload: Value,
     ) -> Result<Value, ExtensionError> {
         if extension.source.is_empty() {

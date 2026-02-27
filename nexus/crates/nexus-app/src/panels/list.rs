@@ -4,7 +4,7 @@ use serde_json::Value;
 #[component]
 pub fn ListPanel(
     items: Vec<Value>,
-    #[prop(optional, into)] display_template: Option<String>,
+    #[prop(optional, into)] _display_template: Option<String>,
 ) -> impl IntoView {
     view! {
         <div class="panel-list">

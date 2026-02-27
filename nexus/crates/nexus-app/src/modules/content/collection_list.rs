@@ -9,7 +9,6 @@ use crate::components::pagination::Pagination;
 use crate::components::search_input::SearchInput;
 use crate::components::loading::Loading;
 use crate::components::empty_state::EmptyState;
-use crate::components::button::Button;
 use crate::components::icon::Icon;
 use serde_json::Value;
 

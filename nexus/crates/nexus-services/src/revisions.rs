@@ -22,7 +22,7 @@ impl RevisionsService {
         &self,
         collection: &str,
         item: &str,
-        action: &str,
+        _action: &str,
         data: &Value,
         delta: &Value,
         activity_id: Option<i64>,

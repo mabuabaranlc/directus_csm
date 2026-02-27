@@ -42,7 +42,7 @@ impl BunRuntime {
             "extension": extension.manifest.name,
         });
 
-        let context_json = serde_json::to_string(&context)
+        let _context_json = serde_json::to_string(&context)
             .map_err(|e| ExtensionError::ExecutionFailed(e.to_string()))?;
 
         // Execute via Bun subprocess with the context passed via stdin

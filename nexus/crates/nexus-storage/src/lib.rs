@@ -3,7 +3,7 @@ pub mod drivers;
 use async_trait::async_trait;
 use futures::Stream;
 use std::pin::Pin;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::AsyncRead;
 
 /// File metadata
 #[derive(Debug, Clone)]

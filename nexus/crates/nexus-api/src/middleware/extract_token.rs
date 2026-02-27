@@ -1,5 +1,4 @@
-use actix_web::dev::{ServiceRequest, ServiceResponse};
-use actix_web::HttpMessage;
+use actix_web::dev::ServiceRequest;
 
 /// Extract bearer token from Authorization header, query param, or cookie
 /// Mirrors api/src/middleware/extract-token.ts

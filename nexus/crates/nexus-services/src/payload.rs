@@ -1,8 +1,6 @@
 use crate::context::ServiceContext;
 use crate::items::ServiceError;
-use nexus_types::accountability::Accountability;
 use nexus_types::fields::FieldType;
-use nexus_types::schema::FieldOverview;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
@@ -93,7 +91,7 @@ impl PayloadService {
     /// Process a single field through its special transformers
     async fn process_field(
         &self,
-        field_name: &str,
+        _field_name: &str,
         value: &Value,
         specials: &[String],
         action: PayloadAction,
@@ -347,7 +345,7 @@ impl PayloadService {
                     result.insert(
                         field_name.clone(),
                         FieldWithSpecials {
-                            field_type: field_info.field_type.clone(),
+                            _field_type: field_info.field_type.clone(),
                             specials: field_info.special.clone(),
                         },
                     );
@@ -360,6 +358,6 @@ impl PayloadService {
 }
 
 struct FieldWithSpecials {
-    field_type: FieldType,
+    _field_type: FieldType,
     specials: Vec<String>,
 }

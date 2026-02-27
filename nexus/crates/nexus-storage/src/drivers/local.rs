@@ -1,7 +1,7 @@
 use crate::{FileStat, ReadOptions, StorageDriver, StorageError};
 use async_trait::async_trait;
 use futures::Stream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::pin::Pin;
 use tokio::io::AsyncRead;
 

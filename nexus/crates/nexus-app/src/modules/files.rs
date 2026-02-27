@@ -11,7 +11,7 @@ use serde_json::Value;
 #[component]
 pub fn FilesPage() -> impl IntoView {
     let params = use_params_map();
-    let file_id = move || params.get().get("id").map(|s| s.to_string());
+    let _file_id = move || params.get().get("id").map(|s| s.to_string());
 
     let files = RwSignal::new(Vec::<Value>::new());
     let total = RwSignal::new(0usize);

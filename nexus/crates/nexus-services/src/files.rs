@@ -80,7 +80,7 @@ impl FilesService {
     }
 
     /// Import a file from a URL
-    pub async fn import_one(&self, url: &str, data: Value) -> Result<PrimaryKey, ServiceError> {
+    pub async fn import_one(&self, _url: &str, data: Value) -> Result<PrimaryKey, ServiceError> {
         let mut file_data = data;
 
         if let Some(obj) = file_data.as_object_mut() {

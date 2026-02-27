@@ -2,7 +2,6 @@ pub mod jwt;
 pub mod providers;
 
 use async_trait::async_trait;
-use nexus_types::accountability::Accountability;
 use serde_json::Value;
 
 /// Result type for authentication operations

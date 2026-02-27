@@ -3,7 +3,7 @@ use serde_json::Value;
 
 #[component]
 pub fn GlobalVariablePanel(
-    #[prop(into)] field_key: String,
+    #[prop(into)] _field_key: String,
     value: RwSignal<Value>,
     #[prop(optional, into)] label: Option<String>,
 ) -> impl IntoView {

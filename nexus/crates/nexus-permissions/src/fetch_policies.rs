@@ -44,7 +44,7 @@ pub async fn fetch_policies(
     if let Some(ref user) = accountability.user {
         conditions.push(format!("a.\"user\" = ${}", param_idx));
         bindings.push(SqlValue::Text(user.clone()));
-        param_idx += 1;
+        let _ = param_idx + 1; // keep param_idx available for future use
     }
 
     let where_clause = if conditions.is_empty() {

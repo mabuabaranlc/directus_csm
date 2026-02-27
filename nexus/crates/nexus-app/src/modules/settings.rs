@@ -8,18 +8,18 @@ struct SettingsModule {
     id: &'static str,
     icon: &'static str,
     label: &'static str,
-    description: &'static str,
+    _description: &'static str,
 }
 
 const SETTINGS_MODULES: &[SettingsModule] = &[
-    SettingsModule { id: "data-model", icon: "database", label: "Data Model", description: "Configure collections and fields" },
-    SettingsModule { id: "roles", icon: "supervisor_account", label: "Access Control", description: "Manage roles and permissions" },
-    SettingsModule { id: "presets", icon: "bookmark", label: "Presets & Bookmarks", description: "Manage default collection presets" },
-    SettingsModule { id: "translations", icon: "translate", label: "Translation Strings", description: "Manage custom translations" },
-    SettingsModule { id: "flows", icon: "bolt", label: "Flows", description: "Automation workflows and triggers" },
-    SettingsModule { id: "webhooks", icon: "webhook", label: "Webhooks", description: "HTTP callbacks for events" },
-    SettingsModule { id: "extensions", icon: "extension", label: "Extensions", description: "Manage installed extensions" },
-    SettingsModule { id: "project", icon: "public", label: "Project Settings", description: "General project configuration" },
+    SettingsModule { id: "data-model", icon: "database", label: "Data Model", _description: "Configure collections and fields" },
+    SettingsModule { id: "roles", icon: "supervisor_account", label: "Access Control", _description: "Manage roles and permissions" },
+    SettingsModule { id: "presets", icon: "bookmark", label: "Presets & Bookmarks", _description: "Manage default collection presets" },
+    SettingsModule { id: "translations", icon: "translate", label: "Translation Strings", _description: "Manage custom translations" },
+    SettingsModule { id: "flows", icon: "bolt", label: "Flows", _description: "Automation workflows and triggers" },
+    SettingsModule { id: "webhooks", icon: "webhook", label: "Webhooks", _description: "HTTP callbacks for events" },
+    SettingsModule { id: "extensions", icon: "extension", label: "Extensions", _description: "Manage installed extensions" },
+    SettingsModule { id: "project", icon: "public", label: "Project Settings", _description: "General project configuration" },
 ];
 
 #[component]

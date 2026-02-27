@@ -15,7 +15,7 @@ pub fn CardsLayout(
 ) -> impl IntoView {
     let tf = title_field.unwrap_or_default();
     let sf = subtitle_field.unwrap_or_default();
-    let imgf = image_field.unwrap_or_default();
+    let _imgf = image_field.unwrap_or_default();
 
     view! {
         <div class="layout-cards">

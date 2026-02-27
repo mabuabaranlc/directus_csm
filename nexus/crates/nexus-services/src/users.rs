@@ -1,7 +1,7 @@
 use crate::context::ServiceContext;
 use crate::items::{ItemsService, ServiceError};
 use nexus_auth::providers::local::LocalAuthProvider;
-use nexus_types::items::{MutationOptions, PrimaryKey};
+use nexus_types::items::PrimaryKey;
 use nexus_types::query::Query;
 use serde_json::{json, Value};
 

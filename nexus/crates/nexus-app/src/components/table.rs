@@ -33,7 +33,7 @@ pub fn DataTable(
         }
     }).collect::<Vec<_>>();
 
-    let body_rows = row_data.into_iter().enumerate().map(|(i, row)| {
+    let body_rows = row_data.into_iter().enumerate().map(|(_i, row)| {
         let cells = body_cols.iter().map(|(key, _)| {
             let val = row.get(key)
                 .map(|v| match v {

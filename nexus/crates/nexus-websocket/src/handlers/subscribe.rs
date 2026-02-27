@@ -1,5 +1,5 @@
 use crate::message::OutgoingMessage;
-use crate::{Subscription, SubscriptionEvent, WebSocketManager};
+use crate::{Subscription, WebSocketManager};
 use serde_json::Value;
 use std::sync::Arc;
 

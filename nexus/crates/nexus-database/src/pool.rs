@@ -101,7 +101,7 @@ fn bind_value<'q>(
     query: sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>>,
     value: &'q SqlValue,
 ) -> sqlx::query::Query<'q, sqlx::Any, sqlx::any::AnyArguments<'q>> {
-    use sqlx::Arguments;
+    
     match value {
         SqlValue::Null => query,
         SqlValue::Bool(v) => query.bind(*v),

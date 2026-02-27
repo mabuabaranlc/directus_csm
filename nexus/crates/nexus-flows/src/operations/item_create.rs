@@ -12,26 +12,34 @@ impl FlowOperation for ItemCreateOperation {
         &self,
         _data: Value,
         options: &Value,
-        _context: &OperationContext,
+        context: &OperationContext,
     ) -> Result<Value, FlowError> {
         let collection = options
             .get("collection")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| FlowError::InvalidConfig("Missing 'collection'".to_string()))?;
+            .ok_or_else(|| FlowError::InvalidConfig("Missing 'collection'".to_string()))?
+            .to_string();
 
         let payload = options
             .get("payload")
             .cloned()
             .unwrap_or(json!({}));
 
-        // TODO: Use ItemsService to create the item
-        // Need to inject ServiceContext into OperationContext
-        tracing::info!(collection = collection, "Item create operation");
+        // Extract service context early to avoid lifetime issues
+        let svc_ctx = context.service_context().ok_or_else(|| {
+            FlowError::Internal("No service context available".to_string())
+        })?;
 
-        Ok(json!({
-            "collection": collection,
-            "payload": payload,
-        }))
+        let service = nexus_services::items::ItemsService::new(&collection, svc_ctx);
+
+        let pk = service.create_one(payload, None).await.map_err(|e| {
+            FlowError::OperationFailed(format!("Failed to create item: {}", e))
+        })?;
+
+        match service.read_one(&pk, None, None).await {
+            Ok(item) => Ok(item),
+            Err(_) => Ok(json!({ "id": pk.to_string() })),
+        }
     }
 
     fn operation_type(&self) -> &str {

@@ -1,6 +1,5 @@
 use crate::PermissionContext;
 use nexus_database::SqlValue;
-use serde_json::Value;
 
 /// Fetch the full role tree for a given role ID
 /// Walks up the parent chain to build the complete roles list

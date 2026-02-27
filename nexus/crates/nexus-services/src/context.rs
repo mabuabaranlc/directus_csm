@@ -16,6 +16,14 @@ pub struct ServiceContext {
     pub emitter: Arc<Emitter>,
 }
 
+impl std::fmt::Debug for ServiceContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServiceContext")
+            .field("accountability", &self.accountability)
+            .finish_non_exhaustive()
+    }
+}
+
 impl ServiceContext {
     pub fn new(
         db: Arc<dyn DatabaseBackend>,

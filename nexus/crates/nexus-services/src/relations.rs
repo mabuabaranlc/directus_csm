@@ -2,7 +2,6 @@ use crate::context::ServiceContext;
 use crate::items::{ItemsService, ServiceError};
 use nexus_types::items::PrimaryKey;
 use nexus_types::query::Query;
-use nexus_types::relations::Relation;
 use serde_json::{json, Value};
 
 /// Service for managing relations between collections

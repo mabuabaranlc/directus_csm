@@ -23,7 +23,7 @@ impl FlowOperation for MailOperation {
             .and_then(|v| v.as_str())
             .unwrap_or("(No subject)");
 
-        let body = options
+        let _body = options
             .get("body")
             .and_then(|v| v.as_str())
             .unwrap_or("");

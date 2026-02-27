@@ -24,7 +24,7 @@ pub struct TokenManager {
     secret: String,
     issuer: String,
     access_token_ttl: i64,
-    refresh_token_ttl: i64,
+    _refresh_token_ttl: i64,
 }
 
 impl TokenManager {
@@ -33,7 +33,7 @@ impl TokenManager {
             secret: secret.to_string(),
             issuer: issuer.to_string(),
             access_token_ttl: access_ttl_secs,
-            refresh_token_ttl: refresh_ttl_secs,
+            _refresh_token_ttl: refresh_ttl_secs,
         }
     }
 

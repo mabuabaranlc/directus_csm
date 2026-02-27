@@ -1,7 +1,4 @@
-use crate::fields::Column;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CollectionMeta {

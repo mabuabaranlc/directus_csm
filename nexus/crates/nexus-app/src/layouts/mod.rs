@@ -4,7 +4,6 @@ pub mod calendar;
 pub mod kanban;
 pub mod map;
 
-use serde_json::Value;
 
 /// Available layout types
 #[derive(Clone, Debug, PartialEq)]

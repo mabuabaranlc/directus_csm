@@ -2,7 +2,6 @@ use crate::PermissionContext;
 use nexus_database::SqlValue;
 use nexus_types::accountability::Accountability;
 use nexus_types::permissions::{Permission, PermissionsAction};
-use serde_json::Value;
 
 /// Options for fetching permissions
 pub struct FetchPermissionsOptions<'a> {

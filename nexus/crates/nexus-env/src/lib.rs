@@ -206,3 +206,152 @@ pub fn env_bool(key: &str) -> Option<bool> {
 pub fn env_bool_or(key: &str, default: bool) -> bool {
     env_bool(key).unwrap_or(default)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // Test cast_value with explicit prefixes
+
+    #[test]
+    fn test_cast_string_prefix() {
+        assert_eq!(cast_value("string:hello"), Value::String("hello".to_string()));
+        assert_eq!(cast_value("string:123"), Value::String("123".to_string()));
+        assert_eq!(cast_value("string:true"), Value::String("true".to_string()));
+    }
+
+    #[test]
+    fn test_cast_number_prefix() {
+        assert_eq!(cast_value("number:42"), json!(42));
+        assert_eq!(cast_value("number:3.14"), json!(3.14));
+        assert_eq!(cast_value("number:0"), json!(0));
+    }
+
+    #[test]
+    fn test_cast_boolean_prefix() {
+        assert_eq!(cast_value("boolean:true"), Value::Bool(true));
+        assert_eq!(cast_value("boolean:1"), Value::Bool(true));
+        assert_eq!(cast_value("boolean:false"), Value::Bool(false));
+        assert_eq!(cast_value("boolean:0"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_cast_array_prefix() {
+        assert_eq!(
+            cast_value("array:a,b,c"),
+            json!(["a", "b", "c"])
+        );
+    }
+
+    #[test]
+    fn test_cast_json_prefix() {
+        assert_eq!(
+            cast_value(r#"json:{"key":"value"}"#),
+            json!({"key": "value"})
+        );
+    }
+
+    // Test guess_and_cast heuristics
+
+    #[test]
+    fn test_guess_boolean() {
+        assert_eq!(guess_and_cast("true"), Value::Bool(true));
+        assert_eq!(guess_and_cast("false"), Value::Bool(false));
+    }
+
+    #[test]
+    fn test_guess_number() {
+        assert_eq!(guess_and_cast("42"), json!(42));
+        assert_eq!(guess_and_cast("0"), json!(0));
+        assert_eq!(guess_and_cast("3.14"), json!(3.14));
+        assert_eq!(guess_and_cast("-100"), json!(-100));
+    }
+
+    #[test]
+    fn test_guess_zero_padded_stays_string() {
+        // Zero-padded numbers should remain strings (e.g., zip codes "01234")
+        assert_eq!(guess_and_cast("0123"), Value::String("0123".to_string()));
+    }
+
+    #[test]
+    fn test_guess_comma_separated_as_array() {
+        let result = guess_and_cast("a,b,c");
+        assert!(result.is_array());
+        assert_eq!(result.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_guess_plain_string() {
+        assert_eq!(guess_and_cast("hello"), Value::String("hello".to_string()));
+        assert_eq!(guess_and_cast("my-host.com"), Value::String("my-host.com".to_string()));
+    }
+
+    #[test]
+    fn test_guess_empty_string() {
+        assert_eq!(guess_and_cast(""), Value::String(String::new()));
+    }
+
+    #[test]
+    fn test_guess_json_object() {
+        let result = guess_and_cast(r#"{"key":"value"}"#);
+        assert!(result.is_object());
+        assert_eq!(result["key"], json!("value"));
+    }
+
+    // Test json_number helper
+
+    #[test]
+    fn test_json_number_integer() {
+        assert_eq!(json_number(42.0), json!(42));
+        assert_eq!(json_number(0.0), json!(0));
+        assert_eq!(json_number(-10.0), json!(-10));
+    }
+
+    #[test]
+    fn test_json_number_float() {
+        assert_eq!(json_number(3.14), json!(3.14));
+    }
+
+    // Test defaults are loaded
+
+    #[test]
+    fn test_defaults_exist() {
+        assert!(defaults::DEFAULTS.contains_key("HOST"));
+        assert!(defaults::DEFAULTS.contains_key("PORT"));
+        assert_eq!(defaults::DEFAULTS["PORT"], json!(8055));
+        assert_eq!(defaults::DEFAULTS["HOST"], json!("0.0.0.0"));
+    }
+
+    #[test]
+    fn test_defaults_auth_tokens() {
+        assert_eq!(defaults::DEFAULTS["ACCESS_TOKEN_TTL"], json!("15m"));
+        assert_eq!(defaults::DEFAULTS["REFRESH_TOKEN_TTL"], json!("7d"));
+    }
+
+    #[test]
+    fn test_defaults_rate_limiter() {
+        assert_eq!(defaults::DEFAULTS["RATE_LIMITER_ENABLED"], json!(false));
+        assert_eq!(defaults::DEFAULTS["RATE_LIMITER_POINTS"], json!(50));
+    }
+
+    #[test]
+    fn test_defaults_storage() {
+        assert_eq!(defaults::DEFAULTS["STORAGE_LOCATIONS"], json!("local"));
+        assert_eq!(defaults::DEFAULTS["STORAGE_LOCAL_ROOT"], json!("./uploads"));
+    }
+
+    #[test]
+    fn test_defaults_cache() {
+        assert_eq!(defaults::DEFAULTS["CACHE_ENABLED"], json!(false));
+        assert_eq!(defaults::DEFAULTS["CACHE_STORE"], json!("memory"));
+    }
+
+    // Test that unknown prefix falls through to guessing
+    #[test]
+    fn test_unknown_prefix_falls_through() {
+        // "http://localhost" has "http" as prefix, which is unknown → falls through
+        let result = cast_value("http://localhost");
+        assert_eq!(result, Value::String("http://localhost".to_string()));
+    }
+}

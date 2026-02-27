@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use crate::{FlowError, FlowOperation, OperationContext};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 /// Transform operation — transforms data using a JSON template
 /// Mirrors api/src/operations/transform/index.ts

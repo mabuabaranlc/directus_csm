@@ -1,6 +1,6 @@
 use crate::{ExtensionError, LoadedExtension, RuntimeType};
 use crate::types::{ExtensionLanguage, ExtensionManifest};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Discover and load extensions from the extensions directory
 pub async fn discover_extensions(
