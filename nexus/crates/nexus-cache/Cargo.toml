@@ -1,0 +1,17 @@
+[package]
+name = "nexus-cache"
+description = "Caching layer for Nexus CMS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexus-env.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+moka.workspace = true
+redis.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true

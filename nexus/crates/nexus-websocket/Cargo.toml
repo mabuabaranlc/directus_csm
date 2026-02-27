@@ -1,0 +1,22 @@
+[package]
+name = "nexus-websocket"
+description = "WebSocket subsystem for Nexus CMS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexus-types.workspace = true
+nexus-errors.workspace = true
+nexus-services.workspace = true
+nexus-emitter.workspace = true
+nexus-auth.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+actix-web.workspace = true
+actix-ws.workspace = true
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+futures.workspace = true

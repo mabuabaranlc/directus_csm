@@ -1,0 +1,137 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nexus-types",
+    "crates/nexus-errors",
+    "crates/nexus-env",
+    "crates/nexus-database",
+    "crates/nexus-nosql",
+    "crates/nexus-storage",
+    "crates/nexus-auth",
+    "crates/nexus-cache",
+    "crates/nexus-bus",
+    "crates/nexus-emitter",
+    "crates/nexus-permissions",
+    "crates/nexus-services",
+    "crates/nexus-flows",
+    "crates/nexus-extensions",
+    "crates/nexus-websocket",
+    "crates/nexus-api",
+    "crates/nexus-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "BUSL-1.1"
+repository = "https://github.com/mabuabaranlc/directus_csm"
+authors = ["Nexus Contributors"]
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# HTTP
+actix-web = "4"
+actix-cors = "0.7"
+actix-ws = "0.3"
+reqwest = { version = "0.12", features = ["json"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "any", "json", "uuid", "chrono"] }
+sea-query = { version = "0.32", features = ["backend-postgres", "backend-mysql", "backend-sqlite"] }
+sea-query-binder = { version = "0.7", features = ["sqlx-postgres", "sqlx-mysql", "sqlx-sqlite"] }
+
+# NoSQL
+mongodb = "3"
+
+# Auth
+jsonwebtoken = "9"
+argon2 = "0.5"
+oauth2 = "4"
+openidconnect = "4"
+
+# GraphQL
+async-graphql = "7"
+async-graphql-actix-web = "7"
+
+# OpenAPI
+utoipa = { version = "5", features = ["actix_extras"] }
+utoipa-swagger-ui = { version = "8", features = ["actix-web"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-actix-web = "0.7"
+
+# Cache
+moka = { version = "0.12", features = ["future"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Email
+lettre = { version = "0.11", features = ["tokio1-native-tls", "builder"] }
+
+# Image processing
+image = "0.25"
+
+# Storage
+aws-sdk-s3 = "1"
+azure_storage_blobs = "0.21"
+
+# WASM extensions
+wasmtime = "27"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Rate limiting
+governor = "0.7"
+
+# Cron
+tokio-cron-scheduler = "0.13"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Date/time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Other
+once_cell = "1"
+dashmap = "6"
+regex = "1"
+base64 = "0.22"
+rand = "0.8"
+url = "2"
+mime = "0.3"
+totp-rs = { version = "5", features = ["gen_secret"] }
+
+# Nexus crates
+nexus-types = { path = "crates/nexus-types" }
+nexus-errors = { path = "crates/nexus-errors" }
+nexus-env = { path = "crates/nexus-env" }
+nexus-database = { path = "crates/nexus-database" }
+nexus-nosql = { path = "crates/nexus-nosql" }
+nexus-storage = { path = "crates/nexus-storage" }
+nexus-auth = { path = "crates/nexus-auth" }
+nexus-cache = { path = "crates/nexus-cache" }
+nexus-bus = { path = "crates/nexus-bus" }
+nexus-emitter = { path = "crates/nexus-emitter" }
+nexus-permissions = { path = "crates/nexus-permissions" }
+nexus-services = { path = "crates/nexus-services" }
+nexus-flows = { path = "crates/nexus-flows" }
+nexus-extensions = { path = "crates/nexus-extensions" }
+nexus-websocket = { path = "crates/nexus-websocket" }
+nexus-api = { path = "crates/nexus-api" }
+nexus-cli = { path = "crates/nexus-cli" }

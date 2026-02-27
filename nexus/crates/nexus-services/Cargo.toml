@@ -1,0 +1,27 @@
+[package]
+name = "nexus-services"
+description = "Business logic services for Nexus CMS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexus-types.workspace = true
+nexus-errors.workspace = true
+nexus-env.workspace = true
+nexus-database.workspace = true
+nexus-nosql.workspace = true
+nexus-storage.workspace = true
+nexus-auth.workspace = true
+nexus-cache.workspace = true
+nexus-emitter.workspace = true
+nexus-permissions.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-trait.workspace = true
+async-graphql.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true

@@ -1,0 +1,39 @@
+[package]
+name = "nexus-api"
+description = "HTTP layer (Actix-web) for Nexus CMS"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nexus-types.workspace = true
+nexus-errors.workspace = true
+nexus-env.workspace = true
+nexus-database.workspace = true
+nexus-nosql.workspace = true
+nexus-storage.workspace = true
+nexus-auth.workspace = true
+nexus-cache.workspace = true
+nexus-bus.workspace = true
+nexus-emitter.workspace = true
+nexus-permissions.workspace = true
+nexus-services.workspace = true
+nexus-flows.workspace = true
+nexus-extensions.workspace = true
+nexus-websocket.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+actix-web.workspace = true
+actix-cors.workspace = true
+async-graphql.workspace = true
+async-graphql-actix-web.workspace = true
+utoipa.workspace = true
+utoipa-swagger-ui.workspace = true
+governor.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-actix-web.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+uuid.workspace = true
