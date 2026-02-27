@@ -116,6 +116,8 @@ rand = "0.8"
 url = "2"
 mime = "0.3"
 totp-rs = { version = "5", features = ["gen_secret"] }
+urlencoding = "2"
+futures-util = "0.3"
 
 # Nexus crates
 nexus-types = { path = "crates/nexus-types" }
