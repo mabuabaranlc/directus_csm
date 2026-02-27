@@ -18,6 +18,7 @@ members = [
     "crates/nexus-websocket",
     "crates/nexus-api",
     "crates/nexus-cli",
+    "crates/nexus-app",
 ]
 
 [workspace.package]
@@ -137,3 +138,4 @@ nexus-extensions = { path = "crates/nexus-extensions" }
 nexus-websocket = { path = "crates/nexus-websocket" }
 nexus-api = { path = "crates/nexus-api" }
 nexus-cli = { path = "crates/nexus-cli" }
+nexus-app = { path = "crates/nexus-app" }
