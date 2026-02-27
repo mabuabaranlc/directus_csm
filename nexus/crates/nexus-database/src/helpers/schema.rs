@@ -15,6 +15,12 @@ impl<'a> SchemaInspector<'a> {
         Self { db }
     }
 
+    /// Convenience static method: build a snapshot of the schema
+    pub async fn snapshot(db: &'a dyn DatabaseBackend) -> Result<SchemaOverview, DatabaseError> {
+        let inspector = Self::new(db);
+        inspector.overview().await
+    }
+
     /// Build a complete schema overview from the database
     pub async fn overview(&self) -> Result<SchemaOverview, DatabaseError> {
         let tables = self.get_tables().await?;

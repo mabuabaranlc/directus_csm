@@ -54,7 +54,7 @@ mongodb = "3"
 
 # Auth
 jsonwebtoken = "9"
-argon2 = "0.5"
+argon2 = { version = "0.5", features = ["std"] }
 oauth2 = "4"
 openidconnect = "4"
 

@@ -3759,23 +3759,31 @@ dependencies = [
 name = "nexus-cli"
 version = "0.1.0"
 dependencies = [
+ "actix-cors",
  "actix-web",
  "clap",
  "nexus-api",
  "nexus-database",
+ "nexus-emitter",
  "nexus-env",
+ "nexus-extensions",
+ "nexus-flows",
+ "nexus-types",
+ "nexus-websocket",
  "serde_json",
  "serde_yaml",
  "tokio",
  "tracing",
  "tracing-actix-web",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
 name = "nexus-database"
 version = "0.1.0"
 dependencies = [
+ "argon2",
  "async-trait",
  "chrono",
  "nexus-env",
