@@ -77,7 +77,7 @@ moka = { version = "0.12", features = ["future"] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Email
-lettre = { version = "0.11", features = ["tokio1-native-tls", "builder"] }
+lettre = { version = "0.11", features = ["tokio1-native-tls", "builder", "sendmail-transport", "smtp-transport"] }
 
 # Image processing
 image = "0.25"

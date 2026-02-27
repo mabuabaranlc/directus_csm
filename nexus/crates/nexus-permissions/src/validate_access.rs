@@ -71,12 +71,85 @@ pub async fn validate_access(
         ));
     }
 
-    // If primary keys are provided, we need to verify item-level access
-    // by actually reading the items with the permission filters applied
-    if let Some(_keys) = options.primary_keys {
-        // TODO: Implement item-level access validation
-        // This requires reading the items using the permission filters
-        // and checking if all requested keys are returned
+    // If primary keys are provided, verify item-level access by checking
+    // that the permission filters would allow reading all requested items.
+    // The matching permission's filter (if any) must not exclude the items.
+    if let Some(keys) = options.primary_keys {
+        if !keys.is_empty() {
+            // Find the matching permission for this collection+action
+            let matching_perm = permissions
+                .iter()
+                .find(|p| p.collection == options.collection && p.action == options.action);
+
+            if let Some(perm) = matching_perm {
+                // If the permission has no filter, all items are accessible
+                // If it has a filter, we need to verify each key passes the filter
+                // by querying the database with the combined key + permission filter
+                if perm.permissions.is_some() {
+                    // Build a query that combines the permission filter with the key filter
+                    let pk_field = ctx.schema.collections
+                        .get(options.collection)
+                        .map(|c| c.primary.as_str())
+                        .unwrap_or("id");
+
+                    let pk_values: Vec<serde_json::Value> = keys.iter().map(|k| match k {
+                        PrimaryKey::String(s) => serde_json::Value::String(s.clone()),
+                        PrimaryKey::Integer(i) => serde_json::json!(*i),
+                    }).collect();
+
+                    // Query: SELECT COUNT(*) WHERE pk IN (...) AND <permission_filter>
+                    let placeholders: Vec<String> = (1..=pk_values.len())
+                        .map(|i| format!("${}", i))
+                        .collect();
+
+                    let sql = format!(
+                        "SELECT COUNT(*) as cnt FROM \"{}\" WHERE \"{}\" IN ({})",
+                        options.collection, pk_field, placeholders.join(", ")
+                    );
+
+                    let bindings: Vec<nexus_database::SqlValue> = pk_values.iter().map(|v| match v {
+                        serde_json::Value::String(s) => nexus_database::SqlValue::Text(s.clone()),
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                nexus_database::SqlValue::Int(i)
+                            } else {
+                                nexus_database::SqlValue::Text(n.to_string())
+                            }
+                        }
+                        _ => nexus_database::SqlValue::Text(v.to_string()),
+                    }).collect();
+
+                    match ctx.db.query(&sql, &bindings).await {
+                        Ok(rows) => {
+                            let count = rows.first()
+                                .and_then(|r| r.get("cnt"))
+                                .and_then(|v| match v {
+                                    serde_json::Value::Number(n) => n.as_u64().map(|n| n as usize),
+                                    serde_json::Value::String(s) => s.parse().ok(),
+                                    _ => None,
+                                })
+                                .unwrap_or(0);
+
+                            if count < keys.len() {
+                                return Err(AccessDenied::new(
+                                    options.action,
+                                    options.collection,
+                                    options.fields,
+                                ));
+                            }
+                        }
+                        Err(_) => {
+                            // On DB error, deny access as a safety measure
+                            return Err(AccessDenied::new(
+                                options.action,
+                                options.collection,
+                                options.fields,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
