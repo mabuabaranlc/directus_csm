@@ -44,7 +44,7 @@ actix-web = "4"
 actix-cors = "0.7"
 actix-ws = "0.3"
 actix-multipart = "0.7"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "sqlite", "any", "json", "uuid", "chrono"] }
@@ -85,6 +85,8 @@ image = "0.25"
 
 # Storage
 aws-sdk-s3 = "1"
+azure_core = "0.21"
+azure_storage = "0.21"
 azure_storage_blobs = "0.21"
 
 # WASM extensions

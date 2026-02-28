@@ -15,6 +15,13 @@ tokio = { workspace = true, features = ["fs"] }
 futures.workspace = true
 reqwest.workspace = true
 aws-sdk-s3.workspace = true
+azure_core.workspace = true
+azure_storage.workspace = true
+azure_storage_blobs.workspace = true
+jsonwebtoken.workspace = true
+urlencoding.workspace = true
+url.workspace = true
+time = "0.3"
 tracing.workspace = true
 thiserror.workspace = true
 mime.workspace = true

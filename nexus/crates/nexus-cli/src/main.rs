@@ -84,10 +84,8 @@ async fn init_app_state(
     };
     let emitter = Emitter::new();
 
-    // Initialize storage driver
-    let storage_location = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
-    let storage: Arc<dyn nexus_storage::StorageDriver> =
-        Arc::new(nexus_storage::drivers::local::LocalDriver::new(storage_location));
+    // Initialize storage driver based on STORAGE_LOCATIONS config
+    let storage: Arc<dyn nexus_storage::StorageDriver> = init_storage_driver().await;
 
     let state = AppState::new(db, schema, None, emitter)
         .with_storage(storage);
@@ -415,6 +413,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+/// Initialize the storage driver based on STORAGE_LOCATIONS env var.
+/// Supported values: "local" (default), "s3", "gcs", "azure", "cloudinary".
+async fn init_storage_driver() -> Arc<dyn nexus_storage::StorageDriver> {
+    let driver = nexus_env::env_string_or("STORAGE_LOCATIONS", "local");
+    match driver.to_lowercase().as_str() {
+        "s3" => {
+            tracing::info!("Initializing S3 storage driver");
+            match nexus_storage::drivers::s3::S3Driver::new_from_env() {
+                Ok(d) => Arc::new(d),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to initialize S3 driver, falling back to local");
+                    let root = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
+                    Arc::new(nexus_storage::drivers::local::LocalDriver::new(root))
+                }
+            }
+        }
+        "gcs" | "google" => {
+            tracing::info!("Initializing Google Cloud Storage driver");
+            match nexus_storage::drivers::gcs::GcsDriver::new_from_env().await {
+                Ok(d) => Arc::new(d),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to initialize GCS driver, falling back to local");
+                    let root = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
+                    Arc::new(nexus_storage::drivers::local::LocalDriver::new(root))
+                }
+            }
+        }
+        "azure" => {
+            tracing::info!("Initializing Azure Blob Storage driver");
+            match nexus_storage::drivers::azure::AzureDriver::new_from_env() {
+                Ok(d) => Arc::new(d),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to initialize Azure driver, falling back to local");
+                    let root = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
+                    Arc::new(nexus_storage::drivers::local::LocalDriver::new(root))
+                }
+            }
+        }
+        "cloudinary" => {
+            tracing::info!("Initializing Cloudinary storage driver");
+            match nexus_storage::drivers::cloudinary::CloudinaryDriver::new_from_env() {
+                Ok(d) => Arc::new(d),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to initialize Cloudinary driver, falling back to local");
+                    let root = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
+                    Arc::new(nexus_storage::drivers::local::LocalDriver::new(root))
+                }
+            }
+        }
+        _ => {
+            let root = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
+            tracing::info!(root = %root, "Initializing local storage driver");
+            Arc::new(nexus_storage::drivers::local::LocalDriver::new(root))
+        }
+    }
 }
 
 /// Map a FieldType to a default SQL column type string
