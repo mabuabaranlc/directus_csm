@@ -230,10 +230,165 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             SchemaAction::Apply { snapshot } => {
                 tracing::info!("Applying schema from: {}", snapshot);
-                // TODO: Diff snapshot against current schema and apply changes
+
+                let db = connect_database().await?;
+
+                // Read snapshot file
+                let snapshot_content = std::fs::read_to_string(&snapshot)
+                    .map_err(|e| format!("Failed to read snapshot file '{}': {}", snapshot, e))?;
+
+                // Parse snapshot (detect format from extension)
+                let target_schema: nexus_types::schema::SchemaOverview =
+                    if snapshot.ends_with(".json") {
+                        serde_json::from_str(&snapshot_content)
+                            .map_err(|e| format!("Failed to parse JSON snapshot: {}", e))?
+                    } else {
+                        serde_yaml::from_str(&snapshot_content)
+                            .map_err(|e| format!("Failed to parse YAML snapshot: {}", e))?
+                    };
+
+                // Get current schema
+                let current_schema =
+                    nexus_database::helpers::schema::SchemaInspector::snapshot(db.as_ref()).await?;
+
+                let mut ddl_statements: Vec<String> = Vec::new();
+
+                // 1. Create new collections (tables)
+                for (name, target_col) in &target_schema.collections {
+                    if !current_schema.collections.contains_key(name) {
+                        tracing::info!(collection = %name, "Creating collection");
+                        let mut col_defs: Vec<String> = Vec::new();
+                        for (field_name, field) in &target_col.fields {
+                            let db_type = field
+                                .db_type
+                                .clone()
+                                .unwrap_or_else(|| field_type_to_sql(&field.field_type));
+                            let mut col_def = format!(
+                                "{} {}",
+                                db.quote_identifier(field_name),
+                                db_type
+                            );
+                            if !field.nullable {
+                                col_def.push_str(" NOT NULL");
+                            }
+                            if let Some(ref def) = field.default_value {
+                                if let Some(s) = def.as_str() {
+                                    col_def.push_str(&format!(" DEFAULT '{}'", s));
+                                } else if !def.is_null() {
+                                    col_def.push_str(&format!(" DEFAULT {}", def));
+                                }
+                            }
+                            if field_name == &target_col.primary {
+                                col_def.push_str(" PRIMARY KEY");
+                            }
+                            col_defs.push(col_def);
+                        }
+                        ddl_statements.push(format!(
+                            "CREATE TABLE {} ({})",
+                            db.quote_identifier(name),
+                            col_defs.join(", ")
+                        ));
+                    }
+                }
+
+                // 2. Add new fields to existing collections
+                for (name, target_col) in &target_schema.collections {
+                    if let Some(current_col) = current_schema.collections.get(name) {
+                        for (field_name, field) in &target_col.fields {
+                            if !current_col.fields.contains_key(field_name) {
+                                tracing::info!(collection = %name, field = %field_name, "Adding field");
+                                let db_type = field
+                                    .db_type
+                                    .clone()
+                                    .unwrap_or_else(|| field_type_to_sql(&field.field_type));
+                                let nullable = if field.nullable { "" } else { " NOT NULL" };
+                                ddl_statements.push(format!(
+                                    "ALTER TABLE {} ADD COLUMN {} {}{}",
+                                    db.quote_identifier(name),
+                                    db.quote_identifier(field_name),
+                                    db_type,
+                                    nullable,
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // 3. Drop user collections that no longer exist in the target
+                for name in current_schema.collections.keys() {
+                    if !target_schema.collections.contains_key(name)
+                        && !name.starts_with("directus_")
+                    {
+                        tracing::info!(collection = %name, "Dropping collection");
+                        ddl_statements.push(format!(
+                            "DROP TABLE IF EXISTS {}",
+                            db.quote_identifier(name)
+                        ));
+                    }
+                }
+
+                // 4. Drop fields that no longer exist in the target
+                for (name, current_col) in &current_schema.collections {
+                    if let Some(target_col) = target_schema.collections.get(name) {
+                        for field_name in current_col.fields.keys() {
+                            if !target_col.fields.contains_key(field_name) {
+                                tracing::info!(collection = %name, field = %field_name, "Dropping field");
+                                ddl_statements.push(format!(
+                                    "ALTER TABLE {} DROP COLUMN {}",
+                                    db.quote_identifier(name),
+                                    db.quote_identifier(field_name),
+                                ));
+                            }
+                        }
+                    }
+                }
+
+                // Execute all DDL statements
+                if ddl_statements.is_empty() {
+                    tracing::info!("Schema is already up to date. No changes needed.");
+                } else {
+                    tracing::info!(
+                        changes = ddl_statements.len(),
+                        "Applying schema changes..."
+                    );
+                    for stmt in &ddl_statements {
+                        tracing::debug!(sql = %stmt, "Executing DDL");
+                        db.execute(stmt, &[]).await.map_err(|e| {
+                            format!("Failed to execute DDL '{}': {}", stmt, e)
+                        })?;
+                    }
+                    tracing::info!("Schema apply complete.");
+                }
             }
         },
     }
 
     Ok(())
+}
+
+/// Map a FieldType to a default SQL column type string
+fn field_type_to_sql(ft: &nexus_types::fields::FieldType) -> String {
+    use nexus_types::fields::FieldType;
+    match ft {
+        FieldType::Integer => "integer".to_string(),
+        FieldType::BigInteger => "bigint".to_string(),
+        FieldType::Float | FieldType::Decimal => "real".to_string(),
+        FieldType::Boolean => "boolean".to_string(),
+        FieldType::String | FieldType::Hash | FieldType::Csv => "varchar(255)".to_string(),
+        FieldType::Text => "text".to_string(),
+        FieldType::Date => "date".to_string(),
+        FieldType::Time => "time".to_string(),
+        FieldType::DateTime | FieldType::Timestamp => "timestamp".to_string(),
+        FieldType::Json => "jsonb".to_string(),
+        FieldType::Uuid => "uuid".to_string(),
+        FieldType::Binary => "bytea".to_string(),
+        FieldType::Geometry
+        | FieldType::GeometryPoint
+        | FieldType::GeometryLineString
+        | FieldType::GeometryPolygon
+        | FieldType::GeometryMultiPoint
+        | FieldType::GeometryMultiLineString
+        | FieldType::GeometryMultiPolygon => "geometry".to_string(),
+        FieldType::Alias | FieldType::Unknown => "text".to_string(),
+    }
 }

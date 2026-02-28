@@ -22,29 +22,29 @@ async fn get_asset(
     let service = FilesService::new(ctx);
     let pk = PrimaryKey::String(path.into_inner());
 
-    // Look up file metadata
-    match service.read_one(&pk).await {
-        Ok(file) => {
-            // In a full implementation, this would:
-            // 1. Read the file from storage
-            // 2. Apply image transformations (width, height, quality, format, fit)
-            // 3. Set proper Content-Type and Cache-Control headers
-            // 4. Stream the file content
-
-            let filename = file
-                .get("filename_download")
-                .and_then(|v| v.as_str())
-                .unwrap_or("file");
-            let content_type = file
-                .get("type")
-                .and_then(|v| v.as_str())
-                .unwrap_or("application/octet-stream");
+    // Read file content via the storage driver
+    match service.read_file_content(&pk).await {
+        Ok((bytes, content_type)) => {
+            // Get metadata for the download filename
+            let filename = service
+                .read_one(&pk)
+                .await
+                .ok()
+                .and_then(|f| {
+                    f.get("filename_download")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_else(|| "file".to_string());
 
             HttpResponse::Ok()
                 .content_type(content_type)
-                .insert_header(("Content-Disposition", format!("inline; filename=\"{}\"", filename)))
+                .insert_header((
+                    "Content-Disposition",
+                    format!("inline; filename=\"{}\"", filename),
+                ))
                 .insert_header(("Cache-Control", "public, max-age=31536000"))
-                .body("") // TODO: Serve actual file content from storage
+                .body(bytes)
         }
         Err(_) => HttpResponse::NotFound().json(json!({
             "errors": [{ "message": "Asset not found" }]
