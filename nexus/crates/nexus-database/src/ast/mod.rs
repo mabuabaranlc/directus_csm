@@ -1,6 +1,9 @@
 // AST module — Query→AST→SQL pipeline
 // Mirrors api/src/types/ast.ts and api/src/utils/get-ast-from-query/
 
+pub mod from_query;
+pub mod run_ast;
+
 use nexus_types::query::Query;
 
 /// AST node types for the query pipeline

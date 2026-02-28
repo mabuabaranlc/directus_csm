@@ -13,6 +13,7 @@ nexus-database.workspace = true
 nexus-nosql.workspace = true
 nexus-storage.workspace = true
 nexus-auth.workspace = true
+nexus-bus.workspace = true
 nexus-cache.workspace = true
 nexus-emitter.workspace = true
 nexus-permissions.workspace = true

@@ -1,3 +1,4 @@
+use nexus_bus::MessageBus;
 use nexus_cache::CacheStore;
 use nexus_database::DatabaseBackend;
 use nexus_emitter::Emitter;
@@ -14,6 +15,7 @@ pub struct ServiceContext {
     pub accountability: Option<Accountability>,
     pub cache: Option<Arc<dyn CacheStore>>,
     pub emitter: Arc<Emitter>,
+    pub bus: Option<Arc<dyn MessageBus>>,
 }
 
 impl std::fmt::Debug for ServiceContext {
@@ -38,7 +40,14 @@ impl ServiceContext {
             accountability,
             cache,
             emitter,
+            bus: None,
         }
+    }
+
+    /// Create context with a message bus for WebSocket event delivery
+    pub fn with_bus(mut self, bus: Arc<dyn MessageBus>) -> Self {
+        self.bus = Some(bus);
+        self
     }
 
     /// Fork the context with a different accountability (e.g., for internal unauthenticated operations)
@@ -49,6 +58,7 @@ impl ServiceContext {
             accountability: None,
             cache: self.cache.clone(),
             emitter: self.emitter.clone(),
+            bus: self.bus.clone(),
         }
     }
 
@@ -60,6 +70,7 @@ impl ServiceContext {
             accountability: Some(accountability),
             cache: self.cache.clone(),
             emitter: self.emitter.clone(),
+            bus: self.bus.clone(),
         }
     }
 

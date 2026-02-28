@@ -4531,6 +4531,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "nexus-auth",
+ "nexus-bus",
  "nexus-cache",
  "nexus-database",
  "nexus-emitter",

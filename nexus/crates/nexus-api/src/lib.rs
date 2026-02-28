@@ -57,6 +57,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .service(web::scope("/schema").configure(controllers::schema::configure))
             // Utilities
             .service(web::scope("/utils").configure(controllers::utils::configure))
+            // GraphQL endpoint
+            .service(web::scope("/graphql").configure(controllers::graphql::configure))
             // Documentation routes
             .service(web::scope("/docs").configure(openapi::configure)),
     );

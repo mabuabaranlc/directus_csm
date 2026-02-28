@@ -1,6 +1,9 @@
 use crate::context::ServiceContext;
 use nexus_database::{DatabaseBackend, SqlValue};
+use nexus_permissions::validate_access::{validate_access, ValidateAccessOptions};
+use nexus_permissions::PermissionContext;
 use nexus_types::items::{Item, MutationOptions, PrimaryKey, QueryOptions};
+use nexus_types::permissions::PermissionsAction;
 use nexus_types::query::Query;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -43,6 +46,9 @@ impl ItemsService {
         opts: Option<MutationOptions>,
     ) -> Result<PrimaryKey, ServiceError> {
         let emit_events = opts.as_ref().and_then(|o| o.emit_events).unwrap_or(true);
+
+        // Check permissions
+        self.check_access(PermissionsAction::Create, None).await?;
 
         // Emit filter hook: items.create
         if emit_events {
@@ -113,6 +119,12 @@ impl ItemsService {
             );
         }
 
+        // Broadcast WebSocket event
+        self.broadcast_ws_event("create", &json!({
+            "key": pk_value.to_string(),
+            "payload": data,
+        }));
+
         // Clear cache
         self.clear_cache().await;
 
@@ -142,6 +154,9 @@ impl ItemsService {
         query: Query,
         _opts: Option<QueryOptions>,
     ) -> Result<Vec<Item>, ServiceError> {
+        // Check permissions
+        self.check_access(PermissionsAction::Read, None).await?;
+
         // Build SQL SELECT
         let fields = query
             .fields
@@ -326,6 +341,9 @@ impl ItemsService {
         let emit_events = opts.as_ref().and_then(|o| o.emit_events).unwrap_or(true);
         let pk_field = self.get_primary_key_field()?;
 
+        // Check permissions
+        self.check_access(PermissionsAction::Update, Some(keys)).await?;
+
         // Emit filter hook
         if emit_events {
             data = self
@@ -414,6 +432,11 @@ impl ItemsService {
             );
         }
 
+        // Broadcast WebSocket event
+        self.broadcast_ws_event("update", &json!({
+            "keys": keys.iter().map(|k| k.to_string()).collect::<Vec<_>>(),
+        }));
+
         self.clear_cache().await;
 
         Ok(keys.to_vec())
@@ -481,6 +504,9 @@ impl ItemsService {
         let emit_events = opts.as_ref().and_then(|o| o.emit_events).unwrap_or(true);
         let pk_field = self.get_primary_key_field()?;
 
+        // Check permissions
+        self.check_access(PermissionsAction::Delete, Some(keys)).await?;
+
         // Emit filter hook
         if emit_events {
             let _ = self
@@ -533,6 +559,11 @@ impl ItemsService {
                 }),
             );
         }
+
+        // Broadcast WebSocket event
+        self.broadcast_ws_event("delete", &json!({
+            "keys": keys.iter().map(|k| k.to_string()).collect::<Vec<_>>(),
+        }));
 
         self.clear_cache().await;
 
@@ -608,6 +639,42 @@ impl ItemsService {
 
     // ── Internal helpers ──────────────────────────────────────────
 
+    /// Check permissions for the given action. No-op for admin users and
+    /// unauthenticated (internal) contexts.
+    async fn check_access(
+        &self,
+        action: PermissionsAction,
+        keys: Option<&[PrimaryKey]>,
+    ) -> Result<(), ServiceError> {
+        let accountability = match &self.ctx.accountability {
+            Some(acc) => acc,
+            None => return Ok(()), // Internal/unauthenticated context — skip
+        };
+
+        if accountability.admin {
+            return Ok(());
+        }
+
+        let perm_ctx = PermissionContext {
+            db: self.ctx.db.clone(),
+            schema: self.ctx.schema.clone(),
+            cache: self.ctx.cache.clone(),
+        };
+
+        validate_access(
+            ValidateAccessOptions {
+                accountability,
+                action,
+                collection: &self.collection,
+                primary_keys: keys,
+                fields: None,
+            },
+            &perm_ctx,
+        )
+        .await
+        .map_err(|e| ServiceError::Forbidden(e.to_string()))
+    }
+
     /// Get primary keys matching a query (used by update_by_query, delete_by_query)
     async fn get_keys_by_query(&self, query: &Query) -> Result<Vec<PrimaryKey>, ServiceError> {
         let pk_field = self.get_primary_key_field()?;
@@ -657,6 +724,24 @@ impl ItemsService {
     async fn clear_cache(&self) {
         if let Some(ref cache) = self.ctx.cache {
             let _ = cache.delete(&format!("cache:{}:*", self.collection)).await;
+        }
+    }
+
+    /// Broadcast a WebSocket event for real-time subscriptions.
+    fn broadcast_ws_event(&self, action: &str, payload: &Value) {
+        if let Some(ref bus) = self.ctx.bus {
+            let event = json!({
+                "type": "subscription",
+                "event": action,
+                "collection": self.collection,
+                "data": payload,
+            });
+            let bus = bus.clone();
+            let channel = format!("ws:{}:{}", self.collection, action);
+            let msg = serde_json::to_vec(&event).unwrap_or_default();
+            tokio::spawn(async move {
+                let _ = bus.publish(&channel, &msg).await;
+            });
         }
     }
 }

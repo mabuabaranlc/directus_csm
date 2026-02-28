@@ -1,6 +1,6 @@
 use crate::{DatabaseBackend, DatabaseError, Dialect, SqlValue, Transaction};
 use async_trait::async_trait;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 
 /// Multi-database connection pool using SQLx
@@ -69,10 +69,14 @@ impl DatabaseBackend for DatabasePool {
     }
 
     async fn begin_transaction(&self) -> Result<Box<dyn Transaction>, DatabaseError> {
-        // SQLx transaction support will be implemented here
-        Err(DatabaseError::NotSupported(
-            "Transactions not yet implemented for AnyPool".to_string(),
-        ))
+        let tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| DatabaseError::Transaction(e.to_string()))?;
+        Ok(Box::new(SqlxTransaction {
+            inner: Some(tx),
+        }))
     }
 
     fn dialect(&self) -> Dialect {
@@ -119,14 +123,146 @@ fn row_to_map(row: &sqlx::any::AnyRow) -> HashMap<String, Value> {
 
     for col in row.columns() {
         let name = col.name().to_string();
-        let value: Option<String> = row.try_get(col.name()).ok();
-        map.insert(
-            name,
-            value
-                .map(Value::String)
-                .unwrap_or(Value::Null),
-        );
+
+        // Try to preserve native types instead of converting everything to String
+        let value = row_column_to_value(row, col);
+        map.insert(name, value);
     }
 
     map
+}
+
+/// Extract a column value preserving its native JSON type.
+fn row_column_to_value(row: &sqlx::any::AnyRow, col: &<sqlx::Any as sqlx::Database>::Column) -> Value {
+    use sqlx::{Column, Row, TypeInfo, ValueRef as _};
+
+    let col_name = col.name();
+    let type_name = col.type_info().name().to_uppercase();
+
+    // Check for NULL first
+    if let Ok(raw) = row.try_get_raw(col_name) {
+        if raw.is_null() {
+            return Value::Null;
+        }
+    }
+
+    // Try typed extraction based on column type info
+    match type_name.as_str() {
+        "BOOL" | "BOOLEAN" => {
+            if let Ok(v) = row.try_get::<bool, _>(col_name) {
+                return Value::Bool(v);
+            }
+        }
+        "INT2" | "INT4" | "INT8" | "SMALLINT" | "INTEGER" | "BIGINT" | "SERIAL"
+        | "BIGSERIAL" | "TINYINT" | "MEDIUMINT" => {
+            if let Ok(v) = row.try_get::<i64, _>(col_name) {
+                return json!(v);
+            }
+            if let Ok(v) = row.try_get::<i32, _>(col_name) {
+                return json!(v);
+            }
+        }
+        "FLOAT4" | "FLOAT8" | "REAL" | "DOUBLE" | "DOUBLE PRECISION" | "NUMERIC" | "DECIMAL" => {
+            if let Ok(v) = row.try_get::<f64, _>(col_name) {
+                return json!(v);
+            }
+        }
+        "JSON" | "JSONB" => {
+            // Try as string first, then parse as JSON
+            if let Ok(s) = row.try_get::<String, _>(col_name) {
+                if let Ok(parsed) = serde_json::from_str::<Value>(&s) {
+                    return parsed;
+                }
+                return Value::String(s);
+            }
+        }
+        _ => {}
+    }
+
+    // Fallback: try as string
+    if let Ok(v) = row.try_get::<String, _>(col_name) {
+        return Value::String(v);
+    }
+
+    // Last resort: null
+    Value::Null
+}
+
+// ── Transaction implementation ──────────────────────────────────
+
+/// SQLx transaction wrapper implementing the Transaction trait.
+struct SqlxTransaction {
+    inner: Option<sqlx::Transaction<'static, sqlx::Any>>,
+}
+
+#[async_trait]
+impl Transaction for SqlxTransaction {
+    async fn execute(&mut self, sql: &str, bindings: &[SqlValue]) -> Result<u64, DatabaseError> {
+        let tx = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| DatabaseError::Transaction("Transaction already consumed".into()))?;
+
+        let mut query = sqlx::query(sql);
+        for binding in bindings {
+            query = bind_value(query, binding);
+        }
+
+        let result = query
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+        Ok(result.rows_affected())
+    }
+
+    async fn query(
+        &mut self,
+        sql: &str,
+        bindings: &[SqlValue],
+    ) -> Result<Vec<HashMap<String, Value>>, DatabaseError> {
+        let tx = self
+            .inner
+            .as_mut()
+            .ok_or_else(|| DatabaseError::Transaction("Transaction already consumed".into()))?;
+
+        let mut query = sqlx::query(sql);
+        for binding in bindings {
+            query = bind_value(query, binding);
+        }
+
+        let rows = query
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|e| DatabaseError::Query(e.to_string()))?;
+
+        let mut results = Vec::with_capacity(rows.len());
+        for row in &rows {
+            results.push(row_to_map(row));
+        }
+
+        Ok(results)
+    }
+
+    async fn commit(mut self: Box<Self>) -> Result<(), DatabaseError> {
+        let tx = self
+            .inner
+            .take()
+            .ok_or_else(|| DatabaseError::Transaction("Transaction already consumed".into()))?;
+
+        tx.commit()
+            .await
+            .map_err(|e| DatabaseError::Transaction(e.to_string()))
+    }
+
+    async fn rollback(mut self: Box<Self>) -> Result<(), DatabaseError> {
+        let tx = self
+            .inner
+            .take()
+            .ok_or_else(|| DatabaseError::Transaction("Transaction already consumed".into()))?;
+
+        tx.rollback()
+            .await
+            .map_err(|e| DatabaseError::Transaction(e.to_string()))
+    }
 }

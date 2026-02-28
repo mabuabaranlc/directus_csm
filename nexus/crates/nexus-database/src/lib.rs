@@ -76,7 +76,7 @@ pub trait DatabaseBackend: Send + Sync {
 
 /// Transaction handle
 #[async_trait]
-pub trait Transaction: Send + Sync {
+pub trait Transaction: Send {
     async fn execute(&mut self, sql: &str, bindings: &[SqlValue]) -> Result<u64, DatabaseError>;
     async fn query(
         &mut self,
