@@ -59,6 +59,8 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .service(web::scope("/utils").configure(controllers::utils::configure))
             // GraphQL endpoint
             .service(web::scope("/graphql").configure(controllers::graphql::configure))
+            // Server-Sent Events for real-time updates
+            .service(web::scope("/events").configure(controllers::sse::configure))
             // Documentation routes
             .service(web::scope("/docs").configure(openapi::configure)),
     );

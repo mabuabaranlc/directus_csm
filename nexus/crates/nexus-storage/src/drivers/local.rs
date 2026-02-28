@@ -1,4 +1,4 @@
-use crate::{FileStat, ReadOptions, StorageDriver, StorageError};
+use crate::{FileStat, ReadOptions, StorageDriver, StorageError, TusDriver};
 use async_trait::async_trait;
 use futures::Stream;
 use std::path::PathBuf;
@@ -16,6 +16,52 @@ impl LocalDriver {
 
     fn resolve_path(&self, path: &str) -> PathBuf {
         self.root.join(path)
+    }
+
+    /// Guess MIME type from file extension
+    fn guess_mime(path: &str) -> Option<String> {
+        let ext = path.rsplit('.').next()?.to_lowercase();
+        let mime = match ext.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            "png" => "image/png",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            "svg" => "image/svg+xml",
+            "ico" => "image/x-icon",
+            "bmp" => "image/bmp",
+            "tiff" | "tif" => "image/tiff",
+            "avif" => "image/avif",
+            "pdf" => "application/pdf",
+            "json" => "application/json",
+            "xml" => "application/xml",
+            "html" | "htm" => "text/html",
+            "css" => "text/css",
+            "js" | "mjs" => "application/javascript",
+            "ts" => "application/typescript",
+            "txt" => "text/plain",
+            "csv" => "text/csv",
+            "md" => "text/markdown",
+            "yaml" | "yml" => "application/x-yaml",
+            "toml" => "application/toml",
+            "zip" => "application/zip",
+            "gz" | "gzip" => "application/gzip",
+            "tar" => "application/x-tar",
+            "mp3" => "audio/mpeg",
+            "wav" => "audio/wav",
+            "ogg" => "audio/ogg",
+            "mp4" => "video/mp4",
+            "webm" => "video/webm",
+            "avi" => "video/x-msvideo",
+            "mov" => "video/quicktime",
+            "woff" => "font/woff",
+            "woff2" => "font/woff2",
+            "ttf" => "font/ttf",
+            "otf" => "font/otf",
+            "eot" => "application/vnd.ms-fontobject",
+            "wasm" => "application/wasm",
+            _ => return None,
+        };
+        Some(mime.to_string())
     }
 }
 
@@ -62,10 +108,12 @@ impl StorageDriver for LocalDriver {
             .map(chrono::DateTime::<chrono::Utc>::from)
             .unwrap_or_else(|_| chrono::Utc::now());
 
+        let content_type = Self::guess_mime(path);
+
         Ok(FileStat {
             size: metadata.len(),
             modified,
-            content_type: None,
+            content_type,
         })
     }
 
@@ -112,12 +160,82 @@ impl StorageDriver for LocalDriver {
                 root.clone()
             };
 
-            let mut entries = tokio::fs::read_dir(&search_path).await?;
-            while let Some(entry) = entries.next_entry().await? {
-                if let Ok(relative) = entry.path().strip_prefix(&root) {
-                    yield relative.to_string_lossy().to_string();
+            // Use a stack-based approach for recursive traversal
+            let mut dirs = vec![search_path];
+            while let Some(dir) = dirs.pop() {
+                let mut entries = match tokio::fs::read_dir(&dir).await {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                while let Some(entry) = entries.next_entry().await? {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        dirs.push(path);
+                    } else if let Ok(relative) = path.strip_prefix(&root) {
+                        yield relative.to_string_lossy().to_string();
+                    }
                 }
             }
         })
+    }
+}
+
+#[async_trait]
+impl TusDriver for LocalDriver {
+    async fn create_chunk(
+        &self,
+        key: &str,
+        content: &[u8],
+        offset: u64,
+    ) -> Result<u64, StorageError> {
+        let chunks_dir = self.root.join(".tus-chunks");
+        tokio::fs::create_dir_all(&chunks_dir).await?;
+
+        let chunk_path = chunks_dir.join(key);
+
+        // If offset is 0 and file exists, truncate it; otherwise append
+        if offset == 0 {
+            tokio::fs::write(&chunk_path, content).await?;
+        } else {
+            use tokio::io::AsyncWriteExt;
+            let mut file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&chunk_path)
+                .await?;
+            file.write_all(content).await?;
+        }
+
+        let metadata = tokio::fs::metadata(&chunk_path).await?;
+        Ok(metadata.len())
+    }
+
+    async fn finish_chunks(&self, key: &str) -> Result<(), StorageError> {
+        let chunks_dir = self.root.join(".tus-chunks");
+        let chunk_path = chunks_dir.join(key);
+
+        if !chunk_path.exists() {
+            return Err(StorageError::NotFound(key.to_string()));
+        }
+
+        // Move the finished file to the final location
+        let dest = self.resolve_path(key);
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        tokio::fs::rename(&chunk_path, &dest).await?;
+
+        Ok(())
+    }
+
+    async fn delete_chunks(&self, key: &str) -> Result<(), StorageError> {
+        let chunks_dir = self.root.join(".tus-chunks");
+        let chunk_path = chunks_dir.join(key);
+
+        if chunk_path.exists() {
+            tokio::fs::remove_file(&chunk_path).await?;
+        }
+
+        Ok(())
     }
 }

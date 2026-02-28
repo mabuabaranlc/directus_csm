@@ -77,9 +77,20 @@ async fn connect_database() -> Result<Arc<dyn nexus_database::DatabaseBackend>, 
 async fn init_app_state(
     db: Arc<dyn nexus_database::DatabaseBackend>,
 ) -> Result<actix_web::web::Data<AppState>, Box<dyn std::error::Error>> {
-    let schema = nexus_types::schema::SchemaOverview::default();
+    // Try to load the current schema from the database
+    let schema = match nexus_database::helpers::schema::SchemaInspector::snapshot(db.as_ref()).await {
+        Ok(s) => s,
+        Err(_) => nexus_types::schema::SchemaOverview::default(),
+    };
     let emitter = Emitter::new();
-    let state = AppState::new(db, schema, None, emitter);
+
+    // Initialize storage driver
+    let storage_location = nexus_env::env_string_or("STORAGE_LOCAL_ROOT", "./uploads");
+    let storage: Arc<dyn nexus_storage::StorageDriver> =
+        Arc::new(nexus_storage::drivers::local::LocalDriver::new(storage_location));
+
+    let state = AppState::new(db, schema, None, emitter)
+        .with_storage(storage);
     Ok(actix_web::web::Data::new(state))
 }
 
@@ -112,13 +123,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Initialize app state
             let app_state = init_app_state(db).await?;
 
-            // Initialize WebSocket manager
-            let ws_manager = Arc::new(WebSocketManager::new());
+            // Initialize WebSocket manager with db/schema/emitter for WS CRUD
+            let ws_manager = Arc::new(
+                WebSocketManager::new()
+                    .with_db(app_state.db.clone())
+                    .with_schema(app_state.schema.clone())
+                    .with_emitter(app_state.emitter.clone()),
+            );
             let ws_data = actix_web::web::Data::new(ws_manager.clone());
 
-            // Initialize flow manager
+            // Initialize flow manager and load flows from database
             let flow_manager = Arc::new(nexus_flows::manager::FlowManager::new());
             nexus_flows::operations::register_all(&flow_manager).await;
+
+            // Load flows from the database
+            {
+                let ctx = app_state.service_context(None).await;
+                let flows_svc = nexus_services::items::ItemsService::new("directus_flows", ctx.clone());
+                let ops_svc = nexus_services::items::ItemsService::new("directus_operations", ctx);
+
+                let flow_defs: Vec<nexus_flows::FlowDefinition> = flows_svc
+                    .read_by_query(nexus_types::query::Query::default(), None)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|v| serde_json::from_value(v).ok())
+                    .collect();
+
+                let op_defs: Vec<nexus_flows::OperationDefinition> = ops_svc
+                    .read_by_query(nexus_types::query::Query::default(), None)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|v| serde_json::from_value(v).ok())
+                    .collect();
+
+                flow_manager.load_flows(flow_defs, op_defs).await;
+            }
+
+            // Start the cron scheduler for scheduled flows
+            {
+                let fm = flow_manager.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = nexus_flows::manager::FlowManager::start_cron_scheduler(fm).await {
+                        tracing::warn!(error = %e, "Failed to start cron scheduler");
+                    }
+                });
+            }
 
             // Initialize extension manager
             let extensions_path = nexus_env::env_string_or("EXTENSIONS_PATH", "./extensions");

@@ -129,8 +129,148 @@ pub fn build_schema(schema_overview: &SchemaOverview, app_state: web::Data<AppSt
         query = query.field(by_id_field);
     }
 
-    // Build the schema
-    let mut builder = Schema::build("Query", None, None).register(query);
+    // Build mutation object
+    let mut mutation = Object::new("Mutation");
+
+    for (coll_name, _coll) in &schema_overview.collections {
+        let coll_type_name = to_pascal_case(coll_name);
+
+        // Create mutation: create_<collection>(data: JSON!): <Collection>
+        let coll_owned = coll_name.clone();
+        let app = app_state.clone();
+        let create_field = Field::new(
+            format!("create_{}_item", coll_name),
+            TypeRef::named(&coll_type_name),
+            move |ctx| {
+                let coll = coll_owned.clone();
+                let app = app.clone();
+                FieldFuture::new(async move {
+                    let data_val = ctx
+                        .args
+                        .try_get("data")
+                        .map_err(|_| async_graphql::Error::new("Missing data argument"))?;
+                    let data_str = data_val.string().unwrap_or("{}");
+                    let data: Value = serde_json::from_str(data_str)
+                        .unwrap_or(Value::Object(serde_json::Map::new()));
+
+                    let accountability = ctx
+                        .ctx
+                        .data_opt::<Option<Accountability>>()
+                        .cloned()
+                        .flatten();
+                    let svc_ctx = app.service_context(accountability).await;
+                    let service = ItemsService::new(&coll, svc_ctx);
+
+                    let pk = service
+                        .create_one(data, None)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                    let item = service
+                        .read_one(&pk, None, None)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                    Ok(Some(json_to_field_value(item)))
+                })
+            },
+        )
+        .argument(InputValue::new("data", TypeRef::named_nn(TypeRef::STRING)));
+        mutation = mutation.field(create_field);
+
+        // Update mutation: update_<collection>_item(id: ID!, data: JSON!): <Collection>
+        let coll_owned = coll_name.clone();
+        let app = app_state.clone();
+        let update_field = Field::new(
+            format!("update_{}_item", coll_name),
+            TypeRef::named(&coll_type_name),
+            move |ctx| {
+                let coll = coll_owned.clone();
+                let app = app.clone();
+                FieldFuture::new(async move {
+                    let id_accessor = ctx
+                        .args
+                        .try_get("id")
+                        .map_err(|_| async_graphql::Error::new("Missing id argument"))?;
+                    let id_str = id_accessor.string().unwrap_or("").to_string();
+
+                    let data_val = ctx
+                        .args
+                        .try_get("data")
+                        .map_err(|_| async_graphql::Error::new("Missing data argument"))?;
+                    let data_str = data_val.string().unwrap_or("{}");
+                    let data: Value = serde_json::from_str(data_str)
+                        .unwrap_or(Value::Object(serde_json::Map::new()));
+
+                    let pk = nexus_types::items::PrimaryKey::String(id_str);
+                    let accountability = ctx
+                        .ctx
+                        .data_opt::<Option<Accountability>>()
+                        .cloned()
+                        .flatten();
+                    let svc_ctx = app.service_context(accountability).await;
+                    let service = ItemsService::new(&coll, svc_ctx);
+
+                    service
+                        .update_one(&pk, data, None)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                    let item = service
+                        .read_one(&pk, None, None)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                    Ok(Some(json_to_field_value(item)))
+                })
+            },
+        )
+        .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)))
+        .argument(InputValue::new("data", TypeRef::named_nn(TypeRef::STRING)));
+        mutation = mutation.field(update_field);
+
+        // Delete mutation: delete_<collection>_item(id: ID!): Boolean
+        let coll_owned = coll_name.clone();
+        let app = app_state.clone();
+        let delete_field = Field::new(
+            format!("delete_{}_item", coll_name),
+            TypeRef::named(TypeRef::BOOLEAN),
+            move |ctx| {
+                let coll = coll_owned.clone();
+                let app = app.clone();
+                FieldFuture::new(async move {
+                    let id_accessor = ctx
+                        .args
+                        .try_get("id")
+                        .map_err(|_| async_graphql::Error::new("Missing id argument"))?;
+                    let id_str = id_accessor.string().unwrap_or("").to_string();
+
+                    let pk = nexus_types::items::PrimaryKey::String(id_str);
+                    let accountability = ctx
+                        .ctx
+                        .data_opt::<Option<Accountability>>()
+                        .cloned()
+                        .flatten();
+                    let svc_ctx = app.service_context(accountability).await;
+                    let service = ItemsService::new(&coll, svc_ctx);
+
+                    service
+                        .delete_one(&pk, None)
+                        .await
+                        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                    Ok(Some(FieldValue::value(GqlValue::Boolean(true))))
+                })
+            },
+        )
+        .argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID)));
+        mutation = mutation.field(delete_field);
+    }
+
+    // Build the schema with Query and Mutation
+    let mut builder = Schema::build("Query", Some("Mutation"), None)
+        .register(query)
+        .register(mutation);
 
     // Register all collection types
     for (coll_name, coll) in &schema_overview.collections {

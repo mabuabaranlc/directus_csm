@@ -3,6 +3,7 @@ use nexus_cache::CacheStore;
 use nexus_database::DatabaseBackend;
 use nexus_emitter::Emitter;
 use nexus_services::context::ServiceContext;
+use nexus_storage::StorageDriver;
 use nexus_types::accountability::Accountability;
 use nexus_types::schema::SchemaOverview;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ pub struct AppState {
     pub cache: Option<Arc<dyn CacheStore>>,
     pub emitter: Arc<Emitter>,
     pub bus: Option<Arc<dyn MessageBus>>,
+    pub storage: Option<Arc<dyn StorageDriver>>,
 }
 
 impl AppState {
@@ -30,12 +32,19 @@ impl AppState {
             cache,
             emitter: Arc::new(emitter),
             bus: None,
+            storage: None,
         }
     }
 
     /// Set the message bus for WebSocket event delivery
     pub fn with_bus(mut self, bus: Arc<dyn MessageBus>) -> Self {
         self.bus = Some(bus);
+        self
+    }
+
+    /// Set the storage driver for file operations
+    pub fn with_storage(mut self, storage: Arc<dyn StorageDriver>) -> Self {
+        self.storage = Some(storage);
         self
     }
 

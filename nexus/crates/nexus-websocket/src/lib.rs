@@ -5,6 +5,10 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{broadcast, RwLock};
 
+use nexus_services::context::ServiceContext;
+use nexus_types::accountability::Accountability;
+use nexus_types::schema::SchemaOverview;
+
 pub mod controllers;
 pub mod handlers;
 pub mod message;
@@ -32,6 +36,12 @@ pub struct WebSocketManager {
     subscriptions: Arc<RwLock<HashMap<String, Vec<Subscription>>>>,
     /// Broadcast channel for sending events to all subscribers
     event_tx: broadcast::Sender<WebSocketEvent>,
+    /// Database backend for WS CRUD operations
+    db: Option<Arc<dyn nexus_database::DatabaseBackend>>,
+    /// Schema reference for building service contexts
+    schema: Option<Arc<RwLock<Arc<SchemaOverview>>>>,
+    /// Emitter for events
+    emitter: Option<Arc<nexus_emitter::Emitter>>,
 }
 
 impl WebSocketManager {
@@ -41,7 +51,47 @@ impl WebSocketManager {
         Self {
             subscriptions: Arc::new(RwLock::new(HashMap::new())),
             event_tx,
+            db: None,
+            schema: None,
+            emitter: None,
         }
+    }
+
+    /// Set the database backend for WS CRUD operations
+    pub fn with_db(mut self, db: Arc<dyn nexus_database::DatabaseBackend>) -> Self {
+        self.db = Some(db);
+        self
+    }
+
+    /// Set the schema for building service contexts
+    pub fn with_schema(mut self, schema: Arc<RwLock<Arc<SchemaOverview>>>) -> Self {
+        self.schema = Some(schema);
+        self
+    }
+
+    /// Set the emitter for events
+    pub fn with_emitter(mut self, emitter: Arc<nexus_emitter::Emitter>) -> Self {
+        self.emitter = Some(emitter);
+        self
+    }
+
+    /// Build a ServiceContext for WS CRUD operations
+    pub async fn service_context(
+        &self,
+        accountability: Option<Accountability>,
+    ) -> Option<ServiceContext> {
+        let db = self.db.as_ref()?.clone();
+        let schema = {
+            let schema_lock = self.schema.as_ref()?;
+            schema_lock.read().await.clone()
+        };
+        let emitter = self
+            .emitter
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| Arc::new(nexus_emitter::Emitter::new()));
+
+        Some(ServiceContext::new(db, schema, accountability, None, emitter))
     }
 
     /// Register a new subscription for a connection
@@ -84,6 +134,12 @@ impl WebSocketManager {
     /// Get a receiver for events
     pub fn receiver(&self) -> broadcast::Receiver<WebSocketEvent> {
         self.event_tx.subscribe()
+    }
+
+    /// Get subscriptions for a connection
+    pub async fn get_subscriptions(&self, connection_id: &str) -> Vec<Subscription> {
+        let subs = self.subscriptions.read().await;
+        subs.get(connection_id).cloned().unwrap_or_default()
     }
 }
 

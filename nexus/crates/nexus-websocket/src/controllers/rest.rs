@@ -23,12 +23,55 @@ pub async fn websocket_handler(
     let manager = manager.get_ref().clone();
     let accountability: Arc<RwLock<Option<Accountability>>> = Arc::new(RwLock::new(None));
 
+    // Subscribe to broadcast events for this connection
+    let mut event_rx = manager.receiver();
+
     // Spawn the WebSocket message loop
+    let conn_id_for_events = connection_id.clone();
+    let manager_for_events = manager.clone();
+
     actix_web::rt::spawn(async move {
+        // Clone session for the broadcast listener
+        let mut broadcast_session = session.clone();
+        let conn_id_broadcast = conn_id_for_events.clone();
+        let manager_broadcast = manager_for_events.clone();
+
+        // Spawn a separate task to forward broadcast events to this connection
+        let broadcast_handle = tokio::spawn(async move {
+            loop {
+                match event_rx.recv().await {
+                    Ok(event) => {
+                        // Check if this connection has matching subscriptions
+                        let subs = manager_broadcast.get_subscriptions(&conn_id_broadcast).await;
+                        for sub in &subs {
+                            if sub.collection == event.collection || sub.collection == "*" {
+                                let msg = OutgoingMessage::subscription_event(
+                                    &sub.uid,
+                                    &event.action,
+                                    event.payload.clone(),
+                                );
+                                if let Ok(json) = serde_json::to_string(&msg) {
+                                    if broadcast_session.text(json).await.is_err() {
+                                        return; // Connection closed
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(lagged = n, "WebSocket broadcast receiver lagged");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Main message processing loop
         while let Some(Ok(msg)) = msg_stream.next().await {
             match msg {
                 Message::Text(text) => {
-                    // Parse incoming message
                     match serde_json::from_str::<IncomingMessage>(&text) {
                         Ok(incoming) => {
                             let response = handlers::handle_message(
@@ -64,7 +107,8 @@ pub async fn websocket_handler(
             }
         }
 
-        // Clean up subscriptions on disconnect
+        // Clean up
+        broadcast_handle.abort();
         manager.unsubscribe_all(&connection_id).await;
         tracing::debug!(
             connection_id = %connection_id,

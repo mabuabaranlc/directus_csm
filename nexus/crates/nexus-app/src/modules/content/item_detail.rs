@@ -163,45 +163,144 @@ pub fn ItemDetailPage() -> impl IntoView {
                         let field_name = field.field.clone();
                         let field_label = field.display_name();
                         let field_type = field.field_type.as_deref().unwrap_or("string").to_string();
-                        let fname = field_name.clone();
-                        let fname2 = field_name.clone();
-                        let input_type = if field_type == "integer" || field_type == "float" || field_type == "decimal" {
-                            "number"
-                        } else if field_type == "boolean" {
-                            "checkbox"
-                        } else {
-                            "text"
+                        let interface = field.interface.as_deref().unwrap_or("input").to_string();
+                        let readonly = field.readonly;
+                        let width_class = field.width_class().to_string();
+                        // Create a signal for the current field value
+                        let field_value = {
+                            let fname = field_name.clone();
+                            RwSignal::new(
+                                edits.get().get(&fname).cloned().unwrap_or_else(|| {
+                                    item.get()
+                                        .and_then(|i| i.get(&fname).cloned())
+                                        .unwrap_or(Value::Null)
+                                })
+                            )
                         };
+
+                        // Callback to update edits when value changes
+                        let fname_cb = field_name.clone();
+                        let on_change = Callback::new(move |val: Value| {
+                            edits.update(|m| {
+                                m.insert(fname_cb.clone(), val);
+                            });
+                        });
+
+                        let interface_view = match interface.as_str() {
+                            "boolean" | "toggle" => {
+                                view! {
+                                    <crate::interfaces::boolean::BooleanInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "input-multiline" | "textarea" => {
+                                view! {
+                                    <crate::interfaces::input_multiline::InputMultilineInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "datetime" => {
+                                let dt_type = if field_type == "date" {
+                                    "date"
+                                } else if field_type == "time" {
+                                    "time"
+                                } else {
+                                    "datetime-local"
+                                };
+                                view! {
+                                    <crate::interfaces::datetime::DatetimeInterface
+                                        value=field_value
+                                        input_type=dt_type.to_string()
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "select-dropdown" => {
+                                view! {
+                                    <crate::interfaces::select_dropdown::SelectDropdownInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "input-code" => {
+                                view! {
+                                    <crate::interfaces::input_code::InputCodeInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "input-rich-text-html" => {
+                                view! {
+                                    <crate::interfaces::input_rich_text::InputRichTextInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "slider" => {
+                                view! {
+                                    <crate::interfaces::slider::SliderInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "tags" => {
+                                view! {
+                                    <crate::interfaces::tags::TagsInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            "select-color" => {
+                                view! {
+                                    <crate::interfaces::color::ColorInterface
+                                        value=field_value
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                            _ => {
+                                // Default: use the standard input interface
+                                let input_type = if field_type == "integer" || field_type == "float" || field_type == "decimal" {
+                                    "number"
+                                } else {
+                                    "text"
+                                };
+                                view! {
+                                    <crate::interfaces::input::InputInterface
+                                        value=field_value
+                                        input_type=input_type.to_string()
+                                        disabled=readonly
+                                        on_change=on_change
+                                    />
+                                }.into_any()
+                            }
+                        };
+
                         view! {
-                            <div class="form-field">
+                            <div class=format!("form-field {}", width_class)>
                                 <label>{field_label}</label>
-                                <input
-                                    type=input_type
-                                    prop:value=move || {
-                                        let e = edits.get();
-                                        if let Some(v) = e.get(&fname) {
-                                            return match v {
-                                                Value::String(s) => s.clone(),
-                                                Value::Null => String::new(),
-                                                other => other.to_string(),
-                                            };
-                                        }
-                                        item.get()
-                                            .and_then(|i| i.get(&fname).cloned())
-                                            .map(|v| match v {
-                                                Value::String(s) => s,
-                                                Value::Null => String::new(),
-                                                other => other.to_string(),
-                                            })
-                                            .unwrap_or_default()
-                                    }
-                                    on:input=move |ev| {
-                                        let val = event_target_value(&ev);
-                                        edits.update(|m| {
-                                            m.insert(fname2.clone(), Value::String(val));
-                                        });
-                                    }
-                                />
+                                {interface_view}
+                                {field.note.as_ref().map(|note| view! {
+                                    <p class="field-note">{note.clone()}</p>
+                                })}
                             </div>
                         }
                     }).collect::<Vec<_>>();

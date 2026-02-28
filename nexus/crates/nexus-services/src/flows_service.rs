@@ -2,7 +2,7 @@ use crate::context::ServiceContext;
 use crate::items::{ItemsService, ServiceError};
 use nexus_types::items::PrimaryKey;
 use nexus_types::query::Query;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// Service for managing automation flows
 /// Mirrors api/src/services/flows.ts
@@ -18,8 +18,16 @@ impl FlowsService {
     }
 
     pub async fn create_one(&self, data: Value) -> Result<PrimaryKey, ServiceError> {
-        // TODO: Register flow triggers (webhook, schedule, event)
-        self.items.create_one(data, None).await
+        let pk = self.items.create_one(data.clone(), None).await?;
+
+        // Emit event so FlowManager can register triggers
+        self.ctx.emitter.emit_action(
+            "flows.create",
+            json!({ "key": pk, "payload": data }),
+            json!({ "accountability": self.ctx.accountability }),
+        );
+
+        Ok(pk)
     }
 
     pub async fn read_by_query(&self, query: Query) -> Result<Vec<Value>, ServiceError> {
@@ -35,12 +43,28 @@ impl FlowsService {
         pk: &PrimaryKey,
         data: Value,
     ) -> Result<PrimaryKey, ServiceError> {
-        // TODO: Re-register flow triggers on update
-        self.items.update_one(pk, data, None).await
+        let result = self.items.update_one(pk, data.clone(), None).await?;
+
+        // Emit event so FlowManager can re-register triggers
+        self.ctx.emitter.emit_action(
+            "flows.update",
+            json!({ "keys": [pk], "payload": data }),
+            json!({ "accountability": self.ctx.accountability }),
+        );
+
+        Ok(result)
     }
 
     pub async fn delete_one(&self, pk: &PrimaryKey) -> Result<PrimaryKey, ServiceError> {
-        // TODO: Unregister flow triggers on delete
-        self.items.delete_one(pk, None).await
+        let result = self.items.delete_one(pk, None).await?;
+
+        // Emit event so FlowManager can unregister triggers
+        self.ctx.emitter.emit_action(
+            "flows.delete",
+            json!({ "keys": [pk] }),
+            json!({ "accountability": self.ctx.accountability }),
+        );
+
+        Ok(result)
     }
 }

@@ -42,10 +42,33 @@ try {{
             code
         );
 
+        // Try bun first, fall back to node, then deno
+        let runtime = nexus_env::env_string_or("FLOWS_EXEC_RUNTIME", "auto");
+
+        let (cmd, args): (&str, Vec<&str>) = match runtime.as_str() {
+            "bun" => ("bun", vec!["eval"]),
+            "node" => ("node", vec!["-e"]),
+            "deno" => ("deno", vec!["eval"]),
+            _ => {
+                // Auto-detect: try bun, then node, then deno
+                if Command::new("bun").arg("--version").output().await.is_ok() {
+                    ("bun", vec!["eval"])
+                } else if Command::new("node").arg("--version").output().await.is_ok() {
+                    ("node", vec!["-e"])
+                } else if Command::new("deno").arg("--version").output().await.is_ok() {
+                    ("deno", vec!["eval"])
+                } else {
+                    return Err(FlowError::OperationFailed(
+                        "No JavaScript runtime found. Install bun, node, or deno.".to_string(),
+                    ));
+                }
+            }
+        };
+
         let output = tokio::time::timeout(
             std::time::Duration::from_millis(timeout_ms),
-            Command::new("bun")
-                .arg("eval")
+            Command::new(cmd)
+                .args(&args)
                 .arg(&wrapper)
                 .output(),
         )
@@ -53,7 +76,7 @@ try {{
         .map_err(|_| FlowError::OperationFailed(format!(
             "Script execution timed out after {}ms", timeout_ms
         )))?
-        .map_err(|e| FlowError::OperationFailed(format!("Failed to execute Bun: {}", e)))?;
+        .map_err(|e| FlowError::OperationFailed(format!("Failed to execute {}: {}", cmd, e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

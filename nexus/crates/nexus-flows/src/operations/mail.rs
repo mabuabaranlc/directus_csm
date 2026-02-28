@@ -67,7 +67,26 @@ impl FlowOperation for MailOperation {
 
             let send_result: Result<(), String> = if transport_type == "smtp" {
                 let host = nexus_env::env_string_or("EMAIL_SMTP_HOST", "localhost");
-                let mailer = SmtpTransport::builder_dangerous(&host).build();
+                let port: u16 = nexus_env::env_number_or("EMAIL_SMTP_PORT", 587) as u16;
+                let user = std::env::var("EMAIL_SMTP_USER").ok();
+                let pass = std::env::var("EMAIL_SMTP_PASSWORD").ok();
+                let secure = nexus_env::env_string_or("EMAIL_SMTP_SECURE", "true");
+
+                let mailer = if secure == "true" || port == 465 {
+                    let mut builder = SmtpTransport::relay(&host)
+                        .map_err(|e| FlowError::Internal(e.to_string()))?
+                        .port(port);
+                    if let (Some(u), Some(p)) = (user, pass) {
+                        builder = builder.credentials(lettre::transport::smtp::authentication::Credentials::new(u, p));
+                    }
+                    builder.build()
+                } else {
+                    let mut builder = SmtpTransport::builder_dangerous(&host).port(port);
+                    if let (Some(u), Some(p)) = (user, pass) {
+                        builder = builder.credentials(lettre::transport::smtp::authentication::Credentials::new(u, p));
+                    }
+                    builder.build()
+                };
                 mailer.send(&email).map(|_| ()).map_err(|e| e.to_string())
             } else {
                 // Use sendmail transport

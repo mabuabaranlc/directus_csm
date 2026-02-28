@@ -28,4 +28,5 @@ pub mod comments;
 pub mod extensions_controller;
 pub mod graphql;
 pub mod schema;
+pub mod sse;
 pub mod utils;

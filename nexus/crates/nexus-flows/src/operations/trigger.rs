@@ -4,10 +4,6 @@ use serde_json::{json, Value};
 
 /// Trigger operation — triggers another flow
 /// Mirrors api/src/operations/trigger/index.ts
-///
-/// Note: Full cross-flow triggering requires FlowManager to be accessible
-/// from OperationContext. Currently logs the trigger intent and returns
-/// the payload for the next step in the current flow.
 pub struct TriggerOperation;
 
 #[async_trait]
@@ -16,7 +12,7 @@ impl FlowOperation for TriggerOperation {
         &self,
         data: Value,
         options: &Value,
-        _context: &OperationContext,
+        context: &OperationContext,
     ) -> Result<Value, FlowError> {
         let flow_id = options
             .get("flow")
@@ -33,8 +29,19 @@ impl FlowOperation for TriggerOperation {
             "Trigger operation: triggering flow"
         );
 
-        // Return the trigger result — the FlowManager event loop will pick up
-        // flows triggered by the Operation trigger type
+        // If we have a service context, use the emitter to trigger the target flow
+        if let Some(svc_ctx) = context.service_context() {
+            svc_ctx.emitter.emit_action(
+                "flows.trigger",
+                json!({
+                    "flow": flow_id,
+                    "payload": payload,
+                    "source_flow": context.flow_id,
+                }),
+                json!({}),
+            );
+        }
+
         Ok(json!({
             "flow": flow_id,
             "payload": payload,

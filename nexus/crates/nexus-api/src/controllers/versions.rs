@@ -12,7 +12,8 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         .route("", web::post().to(create_one))
         .route("/{pk}", web::get().to(read_one))
         .route("/{pk}", web::patch().to(update_one))
-        .route("/{pk}", web::delete().to(delete_one));
+        .route("/{pk}", web::delete().to(delete_one))
+        .route("/{pk}/promote", web::post().to(promote));
 }
 
 async fn read_many(state: web::Data<AppState>, req: HttpRequest) -> HttpResponse {
@@ -71,6 +72,17 @@ async fn delete_one(state: web::Data<AppState>, req: HttpRequest, path: web::Pat
     let pk = parse_pk(&path.into_inner());
     match service.delete_one(&pk).await {
         Ok(_) => HttpResponse::NoContent().finish(),
+        Err(e) => HttpResponse::BadRequest().json(json!({ "errors": [{ "message": e.to_string() }] })),
+    }
+}
+
+async fn promote(state: web::Data<AppState>, req: HttpRequest, path: web::Path<String>) -> HttpResponse {
+    let accountability = req.extensions().get::<Accountability>().cloned();
+    let ctx = state.service_context(accountability).await;
+    let service = VersionsService::new(ctx);
+    let pk = parse_pk(&path.into_inner());
+    match service.promote(&pk).await {
+        Ok(item) => HttpResponse::Ok().json(json!({ "data": item })),
         Err(e) => HttpResponse::BadRequest().json(json!({ "errors": [{ "message": e.to_string() }] })),
     }
 }

@@ -121,14 +121,73 @@ pub fn InsightsPage() -> impl IntoView {
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
+                                        let options = panel.get("options").cloned().unwrap_or(Value::Null);
+                                        let color = panel.get("color")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("#6644FF")
+                                            .to_string();
+                                        let icon = panel.get("icon")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("insert_chart")
+                                            .to_string();
+                                        let width = panel.get("width")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or(6);
+                                        let height = panel.get("height")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or(6);
+
+                                        let panel_body = match panel_type.as_str() {
+                                            "metric" => {
+                                                let collection = options.get("collection").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                let func = options.get("function").and_then(|v| v.as_str()).unwrap_or("count").to_string();
+                                                let field = options.get("field").and_then(|v| v.as_str()).unwrap_or("id").to_string();
+                                                view! {
+                                                    <div class="panel-metric">
+                                                        <Icon name=icon.clone()/>
+                                                        <span class="metric-label">{format!("{}({}.{})", func, collection, field)}</span>
+                                                        <PanelDataFetcher collection=collection func=func field=field/>
+                                                    </div>
+                                                }.into_any()
+                                            }
+                                            "list" => {
+                                                let collection = options.get("collection").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                view! {
+                                                    <div class="panel-list">
+                                                        <PanelListFetcher collection=collection/>
+                                                    </div>
+                                                }.into_any()
+                                            }
+                                            "label" => {
+                                                let text = options.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                                view! {
+                                                    <div class="panel-label" style=format!("color: {}", color)>
+                                                        <p>{text}</p>
+                                                    </div>
+                                                }.into_any()
+                                            }
+                                            _ => {
+                                                view! {
+                                                    <div class="panel-generic">
+                                                        <Icon name=icon.clone()/>
+                                                        <span>{format!("{} panel", panel_type)}</span>
+                                                    </div>
+                                                }.into_any()
+                                            }
+                                        };
+
                                         view! {
-                                            <div class="panel-card">
+                                            <div
+                                                class="panel-card"
+                                                style=format!("grid-column: span {}; grid-row: span {}", width, height)
+                                            >
                                                 <div class="panel-header">
+                                                    <Icon name=icon/>
                                                     <span class="panel-name">{name}</span>
                                                     <span class="panel-type">{panel_type}</span>
                                                 </div>
                                                 <div class="panel-body">
-                                                    <p>"Panel content"</p>
+                                                    {panel_body}
                                                 </div>
                                             </div>
                                         }
@@ -140,5 +199,88 @@ pub fn InsightsPage() -> impl IntoView {
                 </div>
             </div>
         </div>
+    }
+}
+
+/// Fetches and displays a single metric value (count, sum, etc.)
+#[component]
+fn PanelDataFetcher(
+    collection: String,
+    func: String,
+    field: String,
+) -> impl IntoView {
+    let result = RwSignal::new(String::from("--"));
+    let client = ApiClient::new();
+
+    Effect::new(move || {
+        let client = client.clone();
+        let collection = collection.clone();
+        let func = func.clone();
+        let field = field.clone();
+        leptos::task::spawn_local(async move {
+            let endpoint = format!("/items/{}?aggregate[{}]={}&limit=0", collection, func, field);
+            if let Ok(resp) = client.get::<Value>(&endpoint).await {
+                if let Some(data) = resp.get("data").and_then(|d| d.as_array()) {
+                    if let Some(first) = data.first() {
+                        let key = format!("{}_{}", func, field);
+                        if let Some(val) = first.get(&key).or(first.get(&func)) {
+                            result.set(match val {
+                                Value::Number(n) => n.to_string(),
+                                Value::String(s) => s.clone(),
+                                _ => val.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        });
+    });
+
+    view! {
+        <span class="metric-value">{move || result.get()}</span>
+    }
+}
+
+/// Fetches and displays a list of items
+#[component]
+fn PanelListFetcher(collection: String) -> impl IntoView {
+    let items = RwSignal::new(Vec::<Value>::new());
+    let client = ApiClient::new();
+
+    Effect::new(move || {
+        let client = client.clone();
+        let collection = collection.clone();
+        leptos::task::spawn_local(async move {
+            let endpoint = format!("/items/{}?limit=10", collection);
+            if let Ok(resp) = client.get::<Value>(&endpoint).await {
+                if let Some(data) = resp.get("data").and_then(|d| d.as_array()) {
+                    items.set(data.clone());
+                }
+            }
+        });
+    });
+
+    view! {
+        <ul class="panel-list-items">
+            <For
+                each=move || items.get()
+                key=|item| {
+                    item.get("id")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default()
+                }
+                children=|item| {
+                    let display = item.get("name")
+                        .or(item.get("title"))
+                        .or(item.get("id"))
+                        .map(|v| match v {
+                            Value::String(s) => s.clone(),
+                            other => other.to_string(),
+                        })
+                        .unwrap_or_default();
+                    view! { <li>{display}</li> }
+                }
+            />
+        </ul>
     }
 }

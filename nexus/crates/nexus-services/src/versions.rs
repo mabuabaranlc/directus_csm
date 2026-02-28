@@ -71,8 +71,47 @@ impl VersionsService {
     /// Promote a version to live (apply changes to the main item)
     pub async fn promote(&self, pk: &PrimaryKey) -> Result<Value, ServiceError> {
         let version = self.items.read_one(pk, None, None).await?;
-        // TODO: Apply delta to main item, create activity record
-        Ok(version)
+
+        // Get the collection and item ID from the version record
+        let collection = version
+            .get("collection")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ServiceError::InvalidPayload("Version missing collection".to_string()))?;
+        let item_id = version
+            .get("item")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ServiceError::InvalidPayload("Version missing item reference".to_string()))?;
+
+        // Get the delta to apply
+        let delta = version
+            .get("delta")
+            .cloned()
+            .unwrap_or(Value::Object(serde_json::Map::new()));
+
+        if delta.is_null() || delta.as_object().map_or(true, |o| o.is_empty()) {
+            return Err(ServiceError::InvalidPayload("Version has no changes to promote".to_string()));
+        }
+
+        // Apply the delta to the main item
+        let main_items = crate::items::ItemsService::new(collection, self.ctx.clone());
+        let main_pk = PrimaryKey::String(item_id.to_string());
+        main_items.update_one(&main_pk, delta, None).await?;
+
+        // Create an activity record for the promotion
+        let activity_items = crate::items::ItemsService::new("directus_activity", self.ctx.clone());
+        let activity_data = json!({
+            "action": "version_promote",
+            "collection": collection,
+            "item": item_id,
+            "user": self.ctx.user_id(),
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "comment": format!("Promoted version {}", pk),
+        });
+        let _ = activity_items.create_one(activity_data, None).await;
+
+        // Read the updated main item and return it
+        let updated = main_items.read_one(&main_pk, None, None).await?;
+        Ok(updated)
     }
 
     pub async fn delete_one(&self, pk: &PrimaryKey) -> Result<PrimaryKey, ServiceError> {

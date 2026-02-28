@@ -142,7 +142,18 @@ impl UsersService {
 
         self.create_one(user_data).await?;
 
-        // TODO: Send invite email via MailService
+        // Emit invite event so mail hook/flow can send the email
+        let public_url = nexus_env::env_string_or("PUBLIC_URL", "http://localhost:8055");
+        self.ctx.emitter.emit_action(
+            "users.invite",
+            json!({
+                "email": email,
+                "role": role,
+                "token": invite_token,
+                "url": format!("{}/admin/accept-invite?token={}", public_url, invite_token),
+            }),
+            json!({ "accountability": self.ctx.accountability }),
+        );
 
         Ok(())
     }
