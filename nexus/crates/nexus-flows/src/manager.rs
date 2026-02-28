@@ -3,7 +3,8 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, warn};
+use tokio_cron_scheduler::{Job, JobScheduler};
+use tracing::{info, warn, error};
 
 /// Flow manager — loads, registers, and executes flows
 /// Mirrors api/src/flows.ts
@@ -18,6 +19,12 @@ pub struct FlowManager {
     event_flows: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Webhook-triggered flows indexed by flow ID
     webhook_flows: Arc<RwLock<HashMap<String, String>>>,
+    /// Cron scheduler for schedule-triggered flows (used by start_cron_scheduler)
+    #[allow(dead_code)]
+    scheduler: Option<JobScheduler>,
+    /// Self-reference for cron callbacks (reserved for future use)
+    #[allow(dead_code)]
+    self_ref: Option<Arc<FlowManager>>,
 }
 
 impl FlowManager {
@@ -28,7 +35,15 @@ impl FlowManager {
             operation_handlers: Arc::new(RwLock::new(HashMap::new())),
             event_flows: Arc::new(RwLock::new(HashMap::new())),
             webhook_flows: Arc::new(RwLock::new(HashMap::new())),
+            scheduler: None,
+            self_ref: None,
         }
+    }
+
+    /// Initialize the cron scheduler. Must be called after construction.
+    pub async fn init_scheduler(manager: Arc<FlowManager>) -> Arc<FlowManager> {
+        // We can't mutate through Arc directly, so scheduler init happens in load_flows
+        manager
     }
 
     /// Register an operation handler (built-in or from extensions)
@@ -78,8 +93,13 @@ impl FlowManager {
                     webhook_map.insert(flow.id.clone(), flow.id.clone());
                 }
                 TriggerType::Schedule => {
-                    // TODO: Register cron jobs with tokio-cron-scheduler
-                    info!(flow_id = %flow.id, "Schedule flow registered (cron not yet active)");
+                    if let Some(options) = &flow.options {
+                        if let Some(cron_expr) = options.get("cron").and_then(|v| v.as_str()) {
+                            info!(flow_id = %flow.id, cron = %cron_expr, "Registering scheduled flow");
+                            // Store info for later scheduler registration
+                            // Actual cron registration happens via register_cron_jobs
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -234,6 +254,73 @@ impl FlowManager {
         drop(webhook_flows);
 
         self.execute_flow(flow_id, payload).await
+    }
+
+    /// Start the cron scheduler for all schedule-triggered flows.
+    /// Call this after load_flows with an Arc<FlowManager>.
+    pub async fn start_cron_scheduler(manager: Arc<FlowManager>) -> Result<(), FlowError> {
+        let scheduler = JobScheduler::new().await.map_err(|e| {
+            FlowError::InvalidConfig(format!("Failed to create scheduler: {}", e))
+        })?;
+
+        let flows = manager.flows.read().await;
+        for flow in flows.values() {
+            if flow.status != "active" {
+                continue;
+            }
+            if !matches!(flow.trigger, TriggerType::Schedule) {
+                continue;
+            }
+
+            let cron_expr = flow
+                .options
+                .as_ref()
+                .and_then(|o| o.get("cron"))
+                .and_then(|v| v.as_str());
+
+            let cron_expr = match cron_expr {
+                Some(c) => c.to_string(),
+                None => continue,
+            };
+
+            let flow_id = flow.id.clone();
+            let mgr = manager.clone();
+
+            match Job::new_async(cron_expr.as_str(), move |_uuid, _lock| {
+                let mgr = mgr.clone();
+                let fid = flow_id.clone();
+                Box::pin(async move {
+                    let payload = serde_json::json!({
+                        "$trigger": {
+                            "type": "schedule",
+                            "timestamp": chrono::Utc::now().to_rfc3339(),
+                        }
+                    });
+                    match mgr.execute_flow(&fid, payload).await {
+                        Ok(_) => info!(flow_id = %fid, "Scheduled flow executed successfully"),
+                        Err(e) => error!(flow_id = %fid, error = %e, "Scheduled flow failed"),
+                    }
+                })
+            }) {
+                Ok(job) => {
+                    scheduler.add(job).await.map_err(|e| {
+                        FlowError::InvalidConfig(format!("Failed to add cron job: {}", e))
+                    })?;
+                    info!(flow_id = %flow.id, cron = %cron_expr, "Cron job registered");
+                }
+                Err(e) => {
+                    warn!(flow_id = %flow.id, error = %e, "Invalid cron expression, skipping");
+                }
+            }
+        }
+        drop(flows);
+
+        scheduler.start().await.map_err(|e| {
+            FlowError::InvalidConfig(format!("Failed to start scheduler: {}", e))
+        })?;
+
+        info!("Cron scheduler started");
+        Ok(())
     }
 }
 

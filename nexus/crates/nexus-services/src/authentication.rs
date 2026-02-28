@@ -85,8 +85,22 @@ impl AuthenticationService {
                 let provided_otp = otp.ok_or_else(|| {
                     ServiceError::Forbidden("OTP required.".to_string())
                 })?;
-                // TODO: Verify OTP against tfa_secret
-                let _ = provided_otp;
+
+                // Verify OTP using totp-rs
+                let totp = totp_rs::TOTP::new(
+                    totp_rs::Algorithm::SHA1,
+                    6,
+                    1,
+                    30,
+                    totp_rs::Secret::Encoded(tfa_secret.to_string())
+                        .to_bytes()
+                        .map_err(|_| ServiceError::Internal("Invalid TFA secret".to_string()))?,
+                )
+                .map_err(|e| ServiceError::Internal(format!("TOTP init failed: {}", e)))?;
+
+                if !totp.check_current(provided_otp).unwrap_or(false) {
+                    return Err(ServiceError::Forbidden("Invalid OTP.".to_string()));
+                }
             }
         }
 

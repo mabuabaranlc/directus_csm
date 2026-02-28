@@ -1,7 +1,9 @@
 use crate::{DataBackend, Item, NoSqlError, PrimaryKey};
 use async_trait::async_trait;
 use mongodb::{bson, Client, Database};
+use nexus_types::filter::{Filter, LogicalFilter};
 use nexus_types::query::Query;
+use serde_json::Value;
 
 pub struct MongoBackend {
     db: Database,
@@ -56,9 +58,8 @@ impl DataBackend for MongoBackend {
         let coll = self.db.collection::<bson::Document>(collection);
 
         // Convert Nexus filter to MongoDB filter document
-        let filter = if let Some(ref _filter) = query.filter {
-            // TODO: Implement full filter translation
-            bson::doc! {}
+        let filter = if let Some(ref nexus_filter) = query.filter {
+            filter_to_bson(nexus_filter)?
         } else {
             bson::doc! {}
         };
@@ -189,5 +190,237 @@ impl DataBackend for MongoBackend {
 
     fn supports_relations(&self) -> bool {
         false // MongoDB doesn't have native relations
+    }
+}
+
+/// Convert a Nexus Filter to a MongoDB BSON filter document
+fn filter_to_bson(filter: &Filter) -> Result<bson::Document, NoSqlError> {
+    match filter {
+        Filter::Logical(logical) => match logical {
+            LogicalFilter::And { _and } => {
+                let conditions: Vec<bson::Bson> = _and
+                    .iter()
+                    .map(|f| filter_to_bson(f).map(bson::Bson::Document))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if conditions.is_empty() {
+                    Ok(bson::doc! {})
+                } else {
+                    Ok(bson::doc! { "$and": conditions })
+                }
+            }
+            LogicalFilter::Or { _or } => {
+                let conditions: Vec<bson::Bson> = _or
+                    .iter()
+                    .map(|f| filter_to_bson(f).map(bson::Bson::Document))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if conditions.is_empty() {
+                    Ok(bson::doc! {})
+                } else {
+                    Ok(bson::doc! { "$or": conditions })
+                }
+            }
+        },
+        Filter::Field(field_map) => {
+            let mut doc = bson::Document::new();
+            for (field, operators) in field_map {
+                if let Some(ops) = operators.as_object() {
+                    let field_doc = ops_to_bson(ops)?;
+                    doc.insert(field.clone(), field_doc);
+                }
+            }
+            Ok(doc)
+        }
+    }
+}
+
+/// Convert operator map { "_eq": val, "_gt": val } to BSON for a single field
+fn ops_to_bson(
+    ops: &serde_json::Map<String, Value>,
+) -> Result<bson::Bson, NoSqlError> {
+    // If there's only _eq, use direct value match
+    if ops.len() == 1 {
+        if let Some(val) = ops.get("_eq") {
+            return Ok(json_to_bson(val));
+        }
+    }
+
+    let mut doc = bson::Document::new();
+
+    for (op, val) in ops {
+        match op.as_str() {
+            "_eq" => {
+                if val.is_null() {
+                    doc.insert("$eq", bson::Bson::Null);
+                } else {
+                    // For single _eq, return the value directly
+                    return Ok(json_to_bson(val));
+                }
+            }
+            "_neq" => {
+                doc.insert("$ne", json_to_bson(val));
+            }
+            "_lt" => {
+                doc.insert("$lt", json_to_bson(val));
+            }
+            "_lte" => {
+                doc.insert("$lte", json_to_bson(val));
+            }
+            "_gt" => {
+                doc.insert("$gt", json_to_bson(val));
+            }
+            "_gte" => {
+                doc.insert("$gte", json_to_bson(val));
+            }
+            "_in" => {
+                if let Some(arr) = val.as_array() {
+                    let bson_arr: Vec<bson::Bson> = arr.iter().map(json_to_bson).collect();
+                    doc.insert("$in", bson_arr);
+                }
+            }
+            "_nin" => {
+                if let Some(arr) = val.as_array() {
+                    let bson_arr: Vec<bson::Bson> = arr.iter().map(json_to_bson).collect();
+                    doc.insert("$nin", bson_arr);
+                }
+            }
+            "_null" => {
+                if val.as_bool().unwrap_or(false) {
+                    doc.insert("$eq", bson::Bson::Null);
+                } else {
+                    doc.insert("$ne", bson::Bson::Null);
+                }
+            }
+            "_nnull" => {
+                if val.as_bool().unwrap_or(false) {
+                    doc.insert("$ne", bson::Bson::Null);
+                } else {
+                    doc.insert("$eq", bson::Bson::Null);
+                }
+            }
+            "_contains" | "_icontains" => {
+                let s = val.as_str().unwrap_or_default();
+                let options = if op == "_icontains" { "i" } else { "" };
+                doc.insert(
+                    "$regex",
+                    bson::Bson::String(regex::escape(s)),
+                );
+                if !options.is_empty() {
+                    doc.insert("$options", bson::Bson::String(options.to_string()));
+                }
+            }
+            "_ncontains" => {
+                let s = val.as_str().unwrap_or_default();
+                doc.insert(
+                    "$not",
+                    bson::doc! { "$regex": regex::escape(s) },
+                );
+            }
+            "_starts_with" | "_istarts_with" => {
+                let s = val.as_str().unwrap_or_default();
+                let options = if op == "_istarts_with" { "i" } else { "" };
+                doc.insert(
+                    "$regex",
+                    bson::Bson::String(format!("^{}", regex::escape(s))),
+                );
+                if !options.is_empty() {
+                    doc.insert("$options", bson::Bson::String(options.to_string()));
+                }
+            }
+            "_ends_with" | "_iends_with" => {
+                let s = val.as_str().unwrap_or_default();
+                let options = if op == "_iends_with" { "i" } else { "" };
+                doc.insert(
+                    "$regex",
+                    bson::Bson::String(format!("{}$", regex::escape(s))),
+                );
+                if !options.is_empty() {
+                    doc.insert("$options", bson::Bson::String(options.to_string()));
+                }
+            }
+            "_between" => {
+                if let Some(arr) = val.as_array() {
+                    if arr.len() == 2 {
+                        doc.insert("$gte", json_to_bson(&arr[0]));
+                        doc.insert("$lte", json_to_bson(&arr[1]));
+                    }
+                }
+            }
+            "_nbetween" => {
+                if let Some(arr) = val.as_array() {
+                    if arr.len() == 2 {
+                        // NOT BETWEEN a AND b → $lt a OR $gt b
+                        return Ok(bson::Bson::Document(bson::doc! {
+                            "$not": {
+                                "$gte": json_to_bson(&arr[0]),
+                                "$lte": json_to_bson(&arr[1]),
+                            }
+                        }));
+                    }
+                }
+            }
+            "_empty" => {
+                if val.as_bool().unwrap_or(false) {
+                    return Ok(bson::Bson::Document(bson::doc! {
+                        "$in": [bson::Bson::Null, bson::Bson::String("".to_string())]
+                    }));
+                } else {
+                    doc.insert("$nin", vec![bson::Bson::Null, bson::Bson::String("".to_string())]);
+                }
+            }
+            "_nempty" => {
+                if val.as_bool().unwrap_or(false) {
+                    doc.insert("$nin", vec![bson::Bson::Null, bson::Bson::String("".to_string())]);
+                } else {
+                    return Ok(bson::Bson::Document(bson::doc! {
+                        "$in": [bson::Bson::Null, bson::Bson::String("".to_string())]
+                    }));
+                }
+            }
+            "_regex" => {
+                let pattern = val.as_str().unwrap_or_default();
+                doc.insert("$regex", bson::Bson::String(pattern.to_string()));
+            }
+            _ => {
+                // Unknown operator, skip
+            }
+        }
+    }
+
+    Ok(bson::Bson::Document(doc))
+}
+
+/// Convert a serde_json::Value to a bson::Bson value
+fn json_to_bson(val: &Value) -> bson::Bson {
+    match val {
+        Value::Null => bson::Bson::Null,
+        Value::Bool(b) => bson::Bson::Boolean(*b),
+        Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                bson::Bson::Int64(i)
+            } else if let Some(f) = n.as_f64() {
+                bson::Bson::Double(f)
+            } else {
+                bson::Bson::String(n.to_string())
+            }
+        }
+        Value::String(s) => {
+            // Try to parse as ObjectId if it looks like one
+            if s.len() == 24 {
+                if let Ok(oid) = bson::oid::ObjectId::parse_str(s) {
+                    return bson::Bson::ObjectId(oid);
+                }
+            }
+            bson::Bson::String(s.clone())
+        }
+        Value::Array(arr) => {
+            bson::Bson::Array(arr.iter().map(json_to_bson).collect())
+        }
+        Value::Object(map) => {
+            let mut doc = bson::Document::new();
+            for (k, v) in map {
+                doc.insert(k.clone(), json_to_bson(v));
+            }
+            bson::Bson::Document(doc)
+        }
     }
 }

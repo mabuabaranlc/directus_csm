@@ -26,3 +26,6 @@ tracing.workspace = true
 thiserror.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+totp-rs.workspace = true
+reqwest.workspace = true
+futures.workspace = true

@@ -1,3 +1,4 @@
+use nexus_bus::MessageBus;
 use nexus_cache::CacheStore;
 use nexus_database::DatabaseBackend;
 use nexus_emitter::Emitter;
@@ -13,6 +14,7 @@ pub struct AppState {
     pub schema: Arc<RwLock<Arc<SchemaOverview>>>,
     pub cache: Option<Arc<dyn CacheStore>>,
     pub emitter: Arc<Emitter>,
+    pub bus: Option<Arc<dyn MessageBus>>,
 }
 
 impl AppState {
@@ -27,7 +29,14 @@ impl AppState {
             schema: Arc::new(RwLock::new(Arc::new(schema))),
             cache,
             emitter: Arc::new(emitter),
+            bus: None,
         }
+    }
+
+    /// Set the message bus for WebSocket event delivery
+    pub fn with_bus(mut self, bus: Arc<dyn MessageBus>) -> Self {
+        self.bus = Some(bus);
+        self
     }
 
     /// Create a ServiceContext from the app state for a given request
@@ -36,12 +45,16 @@ impl AppState {
         accountability: Option<Accountability>,
     ) -> ServiceContext {
         let schema = self.schema.read().await.clone();
-        ServiceContext::new(
+        let mut ctx = ServiceContext::new(
             self.db.clone(),
             schema,
             accountability,
             self.cache.clone(),
             self.emitter.clone(),
-        )
+        );
+        if let Some(ref bus) = self.bus {
+            ctx = ctx.with_bus(bus.clone());
+        }
+        ctx
     }
 }

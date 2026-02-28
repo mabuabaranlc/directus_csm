@@ -1,4 +1,7 @@
+use crate::activity::ActivityService;
 use crate::context::ServiceContext;
+use crate::payload::{PayloadAction, PayloadService};
+use crate::revisions::RevisionsService;
 use nexus_database::{DatabaseBackend, SqlValue};
 use nexus_permissions::validate_access::{validate_access, ValidateAccessOptions};
 use nexus_permissions::PermissionContext;
@@ -64,6 +67,12 @@ impl ItemsService {
                 .map_err(|e| ServiceError::Internal(e.to_string()))?;
         }
 
+        // Run payload service transforms (hashing, uuid gen, date-created, etc.)
+        let payload_svc = PayloadService::new(&self.collection, self.ctx.clone());
+        data = payload_svc
+            .process_values(PayloadAction::Create, data)
+            .await?;
+
         // Get the primary key field name
         let pk_field = self.get_primary_key_field()?;
 
@@ -118,6 +127,14 @@ impl ItemsService {
                 }),
             );
         }
+
+        // Track activity and revision (fire-and-forget)
+        self.track_activity_and_revision(
+            "create",
+            &pk_value,
+            &data,
+            &json!({}),
+        );
 
         // Broadcast WebSocket event
         self.broadcast_ws_event("create", &json!({
@@ -361,6 +378,12 @@ impl ItemsService {
                 .map_err(|e| ServiceError::Internal(e.to_string()))?;
         }
 
+        // Run payload service transforms (date-updated, user-updated, etc.)
+        let payload_svc = PayloadService::new(&self.collection, self.ctx.clone());
+        data = payload_svc
+            .process_values(PayloadAction::Update, data)
+            .await?;
+
         // Build UPDATE query
         let obj = data.as_object().ok_or_else(|| {
             ServiceError::InvalidPayload("Payload must be an object".to_string())
@@ -429,6 +452,16 @@ impl ItemsService {
                     "collection": self.collection,
                     "accountability": self.ctx.accountability,
                 }),
+            );
+        }
+
+        // Track activity and revision for each key (fire-and-forget)
+        for key in keys {
+            self.track_activity_and_revision(
+                "update",
+                key,
+                &data,
+                &data,
             );
         }
 
@@ -557,6 +590,16 @@ impl ItemsService {
                     "collection": self.collection,
                     "accountability": self.ctx.accountability,
                 }),
+            );
+        }
+
+        // Track activity for each deleted key (fire-and-forget)
+        for key in keys {
+            self.track_activity_and_revision(
+                "delete",
+                key,
+                &json!(null),
+                &json!(null),
             );
         }
 
@@ -727,6 +770,49 @@ impl ItemsService {
         }
     }
 
+    /// Track activity and revision for a mutation. Spawns a background task
+    /// to avoid recursive async fn issues (create_one -> track -> create_one on system table).
+    fn track_activity_and_revision(
+        &self,
+        action: &str,
+        key: &PrimaryKey,
+        data: &Value,
+        delta: &Value,
+    ) {
+        // Skip tracking for system tables to avoid infinite recursion
+        if self.collection.starts_with("directus_") {
+            return;
+        }
+
+        let unauth = self.ctx.fork_unauth();
+        let collection = self.collection.clone();
+        let action = action.to_string();
+        let pk_str = key.to_string();
+        let data = data.clone();
+        let delta = delta.clone();
+
+        tokio::spawn(async move {
+            let activity_svc = ActivityService::new(unauth.clone());
+
+            if let Ok(activity_pk) = activity_svc
+                .create_activity(&action, &collection, &pk_str, None)
+                .await
+            {
+                // Create a revision for creates and updates
+                if action != "delete" {
+                    let revision_svc = RevisionsService::new(unauth);
+                    let activity_id = match &activity_pk {
+                        PrimaryKey::Integer(n) => Some(*n),
+                        PrimaryKey::String(s) => s.parse::<i64>().ok(),
+                    };
+                    let _ = revision_svc
+                        .create_revision(&collection, &pk_str, &action, &data, &delta, activity_id)
+                        .await;
+                }
+            }
+        });
+    }
+
     /// Broadcast a WebSocket event for real-time subscriptions.
     fn broadcast_ws_event(&self, action: &str, payload: &Value) {
         if let Some(ref bus) = self.ctx.bus {
@@ -857,13 +943,11 @@ fn build_where_clause(
             for (field, operators) in field_map {
                 if let Some(ops) = operators.as_object() {
                     for (op, val) in ops {
-                        let (clause, binding) =
+                        let (clause, bindings) =
                             build_field_condition(field, op, val, db, &mut param_idx);
                         if let Some(clause) = clause {
                             parts.push(clause);
-                            if let Some(binding) = binding {
-                                all_bindings.push(binding);
-                            }
+                            all_bindings.extend(bindings);
                         }
                     }
                 }
@@ -879,62 +963,60 @@ fn build_where_clause(
 }
 
 /// Build a single field condition (e.g., "field" = $1)
+/// Returns (clause, bindings) where bindings may contain multiple values.
 fn build_field_condition(
     field: &str,
     op: &str,
     val: &Value,
     db: &Arc<dyn DatabaseBackend>,
     param_idx: &mut usize,
-) -> (Option<String>, Option<SqlValue>) {
+) -> (Option<String>, Vec<SqlValue>) {
     let quoted = db.quote_identifier(field);
 
     match op {
         "_eq" => {
             if val.is_null() {
-                (Some(format!("{} IS NULL", quoted)), None)
+                (Some(format!("{} IS NULL", quoted)), vec![])
             } else {
                 let idx = *param_idx;
                 *param_idx += 1;
-                (
-                    Some(format!("{} = ${}", quoted, idx)),
-                    Some(value_to_sql(val)),
-                )
+                (Some(format!("{} = ${}", quoted, idx)), vec![value_to_sql(val)])
             }
         }
         "_neq" => {
             if val.is_null() {
-                (Some(format!("{} IS NOT NULL", quoted)), None)
+                (Some(format!("{} IS NOT NULL", quoted)), vec![])
             } else {
                 let idx = *param_idx;
                 *param_idx += 1;
-                (
-                    Some(format!("{} != ${}", quoted, idx)),
-                    Some(value_to_sql(val)),
-                )
+                (Some(format!("{} != ${}", quoted, idx)), vec![value_to_sql(val)])
             }
         }
         "_lt" => {
             let idx = *param_idx;
             *param_idx += 1;
-            (Some(format!("{} < ${}", quoted, idx)), Some(value_to_sql(val)))
+            (Some(format!("{} < ${}", quoted, idx)), vec![value_to_sql(val)])
         }
         "_lte" => {
             let idx = *param_idx;
             *param_idx += 1;
-            (Some(format!("{} <= ${}", quoted, idx)), Some(value_to_sql(val)))
+            (Some(format!("{} <= ${}", quoted, idx)), vec![value_to_sql(val)])
         }
         "_gt" => {
             let idx = *param_idx;
             *param_idx += 1;
-            (Some(format!("{} > ${}", quoted, idx)), Some(value_to_sql(val)))
+            (Some(format!("{} > ${}", quoted, idx)), vec![value_to_sql(val)])
         }
         "_gte" => {
             let idx = *param_idx;
             *param_idx += 1;
-            (Some(format!("{} >= ${}", quoted, idx)), Some(value_to_sql(val)))
+            (Some(format!("{} >= ${}", quoted, idx)), vec![value_to_sql(val)])
         }
         "_in" => {
             if let Some(arr) = val.as_array() {
+                if arr.is_empty() {
+                    return (Some("1 = 0".to_string()), vec![]);
+                }
                 let placeholders: Vec<String> = arr
                     .iter()
                     .map(|_| {
@@ -943,29 +1025,49 @@ fn build_field_condition(
                         format!("${}", idx)
                     })
                     .collect();
-                // Return multiple bindings packed as first
-                let first_binding = arr.first().map(value_to_sql);
-                // Actually we need to handle this differently for multiple bindings
+                let bindings: Vec<SqlValue> = arr.iter().map(value_to_sql).collect();
                 (
                     Some(format!("{} IN ({})", quoted, placeholders.join(", "))),
-                    first_binding,
+                    bindings,
                 )
             } else {
-                (None, None)
+                (None, vec![])
+            }
+        }
+        "_nin" => {
+            if let Some(arr) = val.as_array() {
+                if arr.is_empty() {
+                    return (Some("1 = 1".to_string()), vec![]);
+                }
+                let placeholders: Vec<String> = arr
+                    .iter()
+                    .map(|_| {
+                        let idx = *param_idx;
+                        *param_idx += 1;
+                        format!("${}", idx)
+                    })
+                    .collect();
+                let bindings: Vec<SqlValue> = arr.iter().map(value_to_sql).collect();
+                (
+                    Some(format!("{} NOT IN ({})", quoted, placeholders.join(", "))),
+                    bindings,
+                )
+            } else {
+                (None, vec![])
             }
         }
         "_null" => {
             if val.as_bool().unwrap_or(false) {
-                (Some(format!("{} IS NULL", quoted)), None)
+                (Some(format!("{} IS NULL", quoted)), vec![])
             } else {
-                (Some(format!("{} IS NOT NULL", quoted)), None)
+                (Some(format!("{} IS NOT NULL", quoted)), vec![])
             }
         }
         "_nnull" => {
             if val.as_bool().unwrap_or(false) {
-                (Some(format!("{} IS NOT NULL", quoted)), None)
+                (Some(format!("{} IS NOT NULL", quoted)), vec![])
             } else {
-                (Some(format!("{} IS NULL", quoted)), None)
+                (Some(format!("{} IS NULL", quoted)), vec![])
             }
         }
         "_contains" => {
@@ -974,7 +1076,7 @@ fn build_field_condition(
             let search = val.as_str().unwrap_or_default();
             (
                 Some(format!("{} LIKE ${}", quoted, idx)),
-                Some(SqlValue::Text(format!("%{}%", search))),
+                vec![SqlValue::Text(format!("%{}%", search))],
             )
         }
         "_ncontains" => {
@@ -983,7 +1085,7 @@ fn build_field_condition(
             let search = val.as_str().unwrap_or_default();
             (
                 Some(format!("{} NOT LIKE ${}", quoted, idx)),
-                Some(SqlValue::Text(format!("%{}%", search))),
+                vec![SqlValue::Text(format!("%{}%", search))],
             )
         }
         "_icontains" => {
@@ -992,7 +1094,7 @@ fn build_field_condition(
             let search = val.as_str().unwrap_or_default();
             (
                 Some(format!("{} ILIKE ${}", quoted, idx)),
-                Some(SqlValue::Text(format!("%{}%", search))),
+                vec![SqlValue::Text(format!("%{}%", search))],
             )
         }
         "_starts_with" => {
@@ -1001,7 +1103,25 @@ fn build_field_condition(
             let search = val.as_str().unwrap_or_default();
             (
                 Some(format!("{} LIKE ${}", quoted, idx)),
-                Some(SqlValue::Text(format!("{}%", search))),
+                vec![SqlValue::Text(format!("{}%", search))],
+            )
+        }
+        "_nstarts_with" => {
+            let idx = *param_idx;
+            *param_idx += 1;
+            let search = val.as_str().unwrap_or_default();
+            (
+                Some(format!("{} NOT LIKE ${}", quoted, idx)),
+                vec![SqlValue::Text(format!("{}%", search))],
+            )
+        }
+        "_istarts_with" => {
+            let idx = *param_idx;
+            *param_idx += 1;
+            let search = val.as_str().unwrap_or_default();
+            (
+                Some(format!("{} ILIKE ${}", quoted, idx)),
+                vec![SqlValue::Text(format!("{}%", search))],
             )
         }
         "_ends_with" => {
@@ -1010,7 +1130,25 @@ fn build_field_condition(
             let search = val.as_str().unwrap_or_default();
             (
                 Some(format!("{} LIKE ${}", quoted, idx)),
-                Some(SqlValue::Text(format!("%{}", search))),
+                vec![SqlValue::Text(format!("%{}", search))],
+            )
+        }
+        "_nends_with" => {
+            let idx = *param_idx;
+            *param_idx += 1;
+            let search = val.as_str().unwrap_or_default();
+            (
+                Some(format!("{} NOT LIKE ${}", quoted, idx)),
+                vec![SqlValue::Text(format!("%{}", search))],
+            )
+        }
+        "_iends_with" => {
+            let idx = *param_idx;
+            *param_idx += 1;
+            let search = val.as_str().unwrap_or_default();
+            (
+                Some(format!("{} ILIKE ${}", quoted, idx)),
+                vec![SqlValue::Text(format!("%{}", search))],
             )
         }
         "_between" => {
@@ -1022,25 +1160,43 @@ fn build_field_condition(
                     *param_idx += 1;
                     (
                         Some(format!("{} BETWEEN ${} AND ${}", quoted, idx1, idx2)),
-                        Some(value_to_sql(&arr[0])),
+                        vec![value_to_sql(&arr[0]), value_to_sql(&arr[1])],
                     )
                 } else {
-                    (None, None)
+                    (None, vec![])
                 }
             } else {
-                (None, None)
+                (None, vec![])
+            }
+        }
+        "_nbetween" => {
+            if let Some(arr) = val.as_array() {
+                if arr.len() == 2 {
+                    let idx1 = *param_idx;
+                    *param_idx += 1;
+                    let idx2 = *param_idx;
+                    *param_idx += 1;
+                    (
+                        Some(format!("{} NOT BETWEEN ${} AND ${}", quoted, idx1, idx2)),
+                        vec![value_to_sql(&arr[0]), value_to_sql(&arr[1])],
+                    )
+                } else {
+                    (None, vec![])
+                }
+            } else {
+                (None, vec![])
             }
         }
         "_empty" => {
             if val.as_bool().unwrap_or(false) {
                 (
                     Some(format!("({} IS NULL OR {} = '')", quoted, quoted)),
-                    None,
+                    vec![],
                 )
             } else {
                 (
                     Some(format!("({} IS NOT NULL AND {} != '')", quoted, quoted)),
-                    None,
+                    vec![],
                 )
             }
         }
@@ -1048,16 +1204,25 @@ fn build_field_condition(
             if val.as_bool().unwrap_or(false) {
                 (
                     Some(format!("({} IS NOT NULL AND {} != '')", quoted, quoted)),
-                    None,
+                    vec![],
                 )
             } else {
                 (
                     Some(format!("({} IS NULL OR {} = '')", quoted, quoted)),
-                    None,
+                    vec![],
                 )
             }
         }
-        _ => (None, None), // Unknown operator, skip
+        "_regex" => {
+            let idx = *param_idx;
+            *param_idx += 1;
+            let pattern = val.as_str().unwrap_or_default();
+            (
+                Some(format!("{} ~ ${}", quoted, idx)),
+                vec![SqlValue::Text(pattern.to_string())],
+            )
+        }
+        _ => (None, vec![]), // Unknown operator, skip
     }
 }
 
